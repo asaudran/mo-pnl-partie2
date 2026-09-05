@@ -284,6 +284,63 @@
     border-radius:10px;padding:10px 14px;
   }
 
+  /* ---------- Game (PnL Maker) ---------- */
+  .rail-btn.game .ticker{color:var(--teal);background:var(--teal-bg);}
+  .game-hud{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;}
+  .hud-box{
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:12px 16px;box-shadow:var(--shadow);flex:1 1 150px;
+  }
+  .hud-label{
+    font-family:'IBM Plex Mono',monospace;font-size:.62rem;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--text-muted);display:block;
+  }
+  .hud-value{
+    font-family:'IBM Plex Mono',monospace;font-size:1.3rem;font-weight:600;
+    font-variant-numeric:tabular-nums;margin-top:2px;
+  }
+  .hud-value.pos{color:var(--good);}
+  .hud-value.neg{color:var(--bad);}
+  .hud-sub{font-size:.72rem;color:var(--text-muted);}
+  .risk-meter{height:5px;border-radius:3px;background:var(--surface-2);overflow:hidden;margin-top:8px;}
+  .risk-meter > span{display:block;height:100%;background:var(--bad);}
+  .spark{display:flex;align-items:flex-end;gap:3px;height:26px;margin-top:8px;}
+  .spark span{flex:1;min-width:3px;border-radius:2px 2px 0 0;background:var(--accent);}
+  .spark span.neg{background:var(--bad);}
+  .ctx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin:14px 0 18px;}
+  .ctx-item{background:var(--surface-2);border-radius:9px;padding:9px 12px;}
+  .ctx-item .k{
+    font-family:'IBM Plex Mono',monospace;font-size:.6rem;letter-spacing:.07em;
+    text-transform:uppercase;color:var(--text-muted);display:block;
+  }
+  .ctx-item .v{font-size:.84rem;font-weight:600;}
+  .choice{
+    display:flex;flex-direction:column;gap:3px;text-align:left;
+    padding:14px 16px;border-radius:10px;border:1px solid var(--border);background:var(--surface);
+  }
+  .choice:hover:not(:disabled){border-color:var(--accent);}
+  .choice .ctag{
+    font-family:'IBM Plex Mono',monospace;font-size:.62rem;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--teal);
+  }
+  .choice .ctitle{font-family:'Source Serif 4',serif;font-size:.94rem;font-weight:600;}
+  .choice.chosen{border-color:var(--accent);background:var(--accent-bg);}
+  .choice.dim{opacity:.5;}
+  .resolution{
+    margin-top:18px;padding:16px 18px;border-radius:10px;
+    border:1px solid var(--border);background:var(--surface-2);
+  }
+  .pnl-delta{
+    font-family:'IBM Plex Mono',monospace;font-size:1.7rem;font-weight:600;
+    font-variant-numeric:tabular-nums;
+  }
+  .pnl-delta.pos{color:var(--good);}
+  .pnl-delta.neg{color:var(--bad);}
+  .lesson{
+    border-top:1px dashed var(--border);margin-top:12px;padding-top:10px;
+    font-size:.85rem;color:var(--text-muted);
+  }
+
   /* ---------- Responsive (kept last so it wins over the base rules above) ---------- */
   @media (max-width:820px){
     .layout{grid-template-columns:1fr;}
@@ -723,6 +780,203 @@ var FICHES = [
 ];
 
 /* =========================================================
+   GAME — "PnL Maker" scenarios
+   Actif piloté : 100 MW / 400 MWh (4h, LFP), nœud ouest ERCOT.
+   Les P&L sont en k$ et nets du coût de charge.
+   ========================================================= */
+var GAME_SCENARIOS = [
+{
+ id:'s1', title:`Vague de chaleur sur Houston`,
+ ctx:[{k:'Météo',v:'42 °C, pas de vent annoncé'},{k:'Charge',v:'85 GW, record saisonnier'},{k:'DA pointe',v:'320 $/MWh (18-20h)'},{k:'SOC',v:'100% ce matin'}],
+ brief:`Le Day-Ahead a clairé la pointe du soir à 320 $/MWh. Les marges de réserve d'ERCOT sont tendues : le Real-Time peut s'envoler bien au-delà — sauf si le vent se lève en soirée comme le suggère un modèle météo minoritaire.`,
+ options:[
+  {label:`Vendre les 400 MWh en Day-Ahead à 320 $/MWh`, tag:`Sécurisé`, outcomes:[
+    {p:1, pnl:116, title:`Position bouclée à 320 $/MWh`, text:`116 k$ encaissés, sans surprise. En Real-Time le prix a touché 1 850 $/MWh pendant deux intervalles : ta capacité étant déjà engagée, tu n'en captes rien. Ce n'est pas une erreur — c'est le coût de la certitude.`}]},
+  {label:`Ne rien vendre, tout garder pour le Real-Time`, tag:`Exposé`, outcomes:[
+    {p:0.55, pnl:728, title:`Spike RT à 1 850 $/MWh`, text:`Tu décharges en plein pic de rareté : 728 k$. C'est exactement le profil de gain d'une batterie merchant — rare, violent, et impossible à capter si tu es déjà couvert.`},
+    {p:0.45, pnl:60, title:`Le vent s'est levé, RT à 180 $/MWh`, text:`La rampe éolienne du soir a écrasé le pic : 60 k$, soit la moitié de ce que le Day-Ahead t'offrait. Le RT ne récompense pas toujours l'exposition.`}]},
+  {label:`Split : 200 MWh en DA, 200 MWh gardés en RT`, tag:`Équilibré`, outcomes:[
+    {p:0.55, pnl:422, title:`Spike capté sur la moitié du volume`, text:`422 k$ : moitié sécurisée à 320 $, moitié dans le spike. Le compromis classique d'un desk qui ne veut ni rater le pic ni jouer sa saison sur une prévision météo.`},
+    {p:0.45, pnl:88, title:`Pas de spike, mais la partie DA amortit`, text:`88 k$ : le RT s'est effondré, mais la jambe Day-Ahead a limité les dégâts. C'est la valeur d'un hedge partiel.`}]}
+ ],
+ lesson:`Base DA-RT : vendre en Day-Ahead, c'est fixer son prix et renoncer au Real-Time. En ERCOT, l'essentiel du revenu annuel d'une batterie merchant se joue sur quelques dizaines d'heures de rareté par an.`
+},
+{
+ id:'s2', title:`Nuit ventée, prix négatifs`,
+ ctx:[{k:'Météo',v:'Vent soutenu, 22 GW éolien'},{k:'Charge',v:'Creux nocturne à 42 GW'},{k:'DA nuit',v:'-12 $/MWh (2h-5h)'},{k:'SOC',v:'20%'}],
+ brief:`Le Day-Ahead est négatif cette nuit : le marché te paie pour consommer. Mais la journée qui suit est incertaine — la demande de demain dépend d'un front nuageux mal cerné par les modèles.`,
+ options:[
+  {label:`Charger à fond maintenant (400 MWh au prix négatif)`, tag:`Agressif`, outcomes:[
+    {p:0.6, pnl:43, title:`Charge payée, décharge à 95 $/MWh`, text:`43 k$ : tu as été payé pour charger, puis revendu sur une pointe molle. Un prix de charge négatif améliore mécaniquement la marge de tout le cycle.`},
+    {p:0.4, pnl:101, title:`Front nuageux confirmé, décharge à 240 $/MWh`, text:`101 k$ : le solaire a manqué à l'appel en journée, la pointe a grimpé. Charger quand on te paie pour le faire est rarement une mauvaise décision.`}]},
+  {label:`Attendre l'aube pour charger si les prix restent bas`, tag:`Prudent`, outcomes:[
+    {p:0.5, pnl:30, title:`Les prix sont remontés à 18 $/MWh`, text:`30 k$ : en attendant, tu as perdu la fenêtre de prix négatifs. L'optionalité a un coût quand on ne l'exerce pas.`},
+    {p:0.5, pnl:28, title:`Toujours bas, mais charge partielle`, text:`28 k$ : la fenêtre s'est resserrée et tu n'as rempli qu'à 60%. Un SOC insuffisant limite directement le revenu de la journée.`}]},
+  {label:`Ne rien faire pour préserver les cycles`, tag:`Conservateur`, outcomes:[
+    {p:1, pnl:0, title:`Cycle économisé, revenu nul`, text:`0 k$. Préserver un cycle n'a de sens que si le spread attendu est inférieur au coût marginal de dégradation (ordre de grandeur : 15-25 k$ par cycle ici). Avec une charge à prix négatif, ce n'était pas le cas.`}]}
+ ],
+ lesson:`Économie du cyclage : un cycle ne se refuse que si la marge attendue est inférieure au coût de dégradation qu'il engendre. Ici, la charge à prix négatif rendait le cycle très rentable.`
+},
+{
+ id:'s3', title:`Congestion sur la ligne 345 kV`,
+ ctx:[{k:'Réseau',v:'Maintenance ligne ouest'},{k:'Ton nœud',v:'En aval de la contrainte'},{k:'Hub North',v:'Référence de ton swap'},{k:'DA nodal',v:'138 $/MWh'}],
+ brief:`Une maintenance de ligne peut isoler ta zone. Ton swap se règle contre le Hub North, mais ton énergie physique se vend à ton propre nœud : si la congestion se matérialise, l'écart est pour toi.`,
+ options:[
+  {label:`Ne rien faire, rester exposé à la base`, tag:`Exposé`, outcomes:[
+    {p:0.35, pnl:-58, title:`Congestion : nœud à 40 $, hub à 210 $`, text:`-58 k$ : ton énergie s'est vendue à 40 $/MWh à ton nœud pendant que ton swap se réglait contre un hub à 210 $/MWh. C'est le risque de base géographique dans toute sa brutalité.`},
+    {p:0.65, pnl:73, title:`Pas de congestion, nœud aligné sur le hub`, text:`73 k$ : la maintenance a été reportée, l'écart nœud-hub est resté négligeable. Tu as gagné la prime que tu n'as pas payée.`}]},
+  {label:`Acheter un CRR nœud→hub pour la journée (coût 35 k$)`, tag:`Couvert`, outcomes:[
+    {p:0.35, pnl:27, title:`Congestion : le CRR paie le différentiel`, text:`27 k$ : la perte de base a été compensée par le CRR, net de son coût. Le résultat est modeste mais positif là où l'exposition nue coûtait -58 k$.`},
+    {p:0.65, pnl:38, title:`Pas de congestion : le CRR expire sans valeur`, text:`38 k$ : tu as payé 35 k$ pour une assurance qui n'a pas servi. C'est le fonctionnement normal d'une couverture — pas une erreur.`}]},
+  {label:`Vendre en Day-Ahead à ton propre nœud (138 $/MWh)`, tag:`Sans base`, outcomes:[
+    {p:1, pnl:44, title:`Prix nodal verrouillé, base neutralisée`, text:`44 k$ garantis : en vendant à ton propre point de règlement, l'écart nœud-hub disparaît par construction. Tu acceptes en échange un prix local plus faible.`}]}
+ ],
+ lesson:`Risque de base géographique : se couvrir sur un hub tout en se réglant à son nœud laisse un écart ouvert. CRR, basis swap, ou vente au nœud sont les trois réponses standard.`
+},
+{
+ id:'s4', title:`Arbitrer énergie contre services auxiliaires`,
+ ctx:[{k:'Marché',v:'RTC+B actif depuis déc. 2025'},{k:'Prix RRS',v:'9 $/MW-h (marché saturé)'},{k:'Spread attendu',v:'180 $/MWh'},{k:'SOC',v:'85%'}],
+ brief:`Le parc de batteries ERCOT dépasse 14 GW et les prix de services auxiliaires se sont effondrés. Depuis RTC+B, SCED co-optimise énergie et réserves toutes les 5 minutes : tu peux basculer en cours de journée.`,
+ options:[
+  {label:`Placer 100 MW en RRS sur toute la journée`, tag:`Ancienne école`, outcomes:[
+    {p:1, pnl:22, title:`22 k$ de revenu AS, et rien d'autre`, text:`22 k$ : la stratégie qui dominait en 2022 rapporte aujourd'hui trois fois moins que l'arbitrage, parce que la demande de réserves est bornée alors que l'offre a explosé.`}]},
+  {label:`Tout consacrer à l'arbitrage énergie`, tag:`Moderne`, outcomes:[
+    {p:0.6, pnl:61, title:`Spread conforme à la prévision`, text:`61 k$ : le spread de 180 $/MWh s'est matérialisé. L'arbitrage représente désormais l'essentiel du revenu d'un BESS en ERCOT.`},
+    {p:0.4, pnl:36, title:`Spread comprimé à 120 $/MWh`, text:`36 k$ : trop de batteries ont visé la même fenêtre. La cannibalisation n'est pas une théorie, elle se lit dans le P&L.`}]},
+  {label:`Co-optimiser : RRS la nuit, énergie sur la pointe`, tag:`RTC+B`, outcomes:[
+    {p:0.6, pnl:69, title:`Les deux poches de valeur captées`, text:`69 k$ : réserves pendant les heures creuses, énergie sur la pointe. C'est précisément la flexibilité qu'apporte la co-optimisation 5 minutes de RTC+B.`},
+    {p:0.4, pnl:44, title:`Spread comprimé, mais l'AS amortit`, text:`44 k$ : l'arbitrage a déçu, les réserves nocturnes ont limité la casse. Diversifier les poches de revenu réduit la variance.`}]}
+ ],
+ lesson:`Revenue stacking post-RTC+B : la valeur ne se choisit plus une fois pour toutes au Day-Ahead, elle se réarbitre en continu entre énergie et réserves.`
+},
+{
+ id:'s5', title:`Tempête hivernale sur le Texas`,
+ ctx:[{k:'Météo',v:'-12 °C, gel généralisé'},{k:'Système',v:'Risque de défaillance gaz'},{k:'DA pic matin',v:'900 $/MWh'},{k:'SOC',v:'60% (240 MWh)'}],
+ brief:`Le souvenir d'Uri plane. Le Day-Ahead affiche déjà 900 $/MWh pour le pic matinal, plafonné à 5 000 $/MWh, tandis que le Real-Time est plafonné à 2 000 $/MWh depuis RTC+B. Le grand froid dégrade aussi la performance de tes batteries.`,
+ options:[
+  {label:`Vendre les 240 MWh disponibles en DA à 900 $/MWh`, tag:`Sécurisé`, outcomes:[
+    {p:1, pnl:209, title:`209 k$ verrouillés avant l'événement`, text:`209 k$ garantis. Sur un événement extrême, vendre en Day-Ahead capture un prix déjà très élevé sans dépendre de la performance réelle de l'actif le jour J.`}]},
+  {label:`Tout garder pour le Real-Time`, tag:`Risqué`, outcomes:[
+    {p:0.45, pnl:473, title:`RT au plafond de 2 000 $/MWh`, text:`473 k$ : le RT a plafonné. Note que le plafond RT (2 000 $) est plus bas que le DA (5 000 $) depuis RTC+B — le potentiel de rareté en temps réel est désormais borné plus tôt.`},
+    {p:0.35, pnl:137, title:`Le système a tenu, RT à 600 $/MWh`, text:`137 k$ : les prévisions alarmistes ne se sont pas réalisées. Moins que le Day-Ahead sécurisé.`},
+    {p:0.2, pnl:-85, title:`Dérating par grand froid : tu ne livres pas`, text:`-85 k$ : la performance de tes packs a chuté sous -10 °C et tu n'as pas pu honorer ta capacité annoncée. Le risque de performance ne disparaît jamais, même quand le prix est bon.`}]},
+  {label:`Moitié en DA, moitié en RT`, tag:`Équilibré`, outcomes:[
+    {p:0.45, pnl:341, title:`Le meilleur des deux mondes`, text:`341 k$ : moitié verrouillée à 900 $, moitié au plafond RT.`},
+    {p:0.55, pnl:173, title:`RT décevant, la jambe DA sauve la journée`, text:`173 k$ : la partie sécurisée porte le résultat. Sur un risque extrême asymétrique, le partage limite le regret dans les deux sens.`}]}
+ ],
+ lesson:`Événements extrêmes : le prix n'est pas le seul risque. Par grand froid, le risque de performance de l'actif (dérating, indisponibilité) peut transformer une position gagnante en perte de rachat.`
+},
+{
+ id:'s6', title:`Prévision solaire ratée`,
+ ctx:[{k:'Météo',v:'Couverture nuageuse imprévue'},{k:'Solaire',v:'-6 GW vs prévision'},{k:'DA après-midi',v:'Clairé bas à 45 $/MWh'},{k:'SOC',v:'90%'}],
+ brief:`Le Day-Ahead a clairé cet après-midi à 45 $/MWh en supposant un solaire abondant. Les nuages arrivent : le Real-Time devrait se tendre nettement. Tu n'as encore rien engagé.`,
+ options:[
+  {label:`Vendre maintenant en Day-Ahead (45 $/MWh)`, tag:`Frileux`, outcomes:[
+    {p:1, pnl:7, title:`7 k$ — la pire décision du jour`, text:`7 k$ : tu as verrouillé un prix construit sur une hypothèse solaire déjà démentie. Quand l'information dont tu disposes contredit le Day-Ahead, la vendre à ce prix revient à offrir ton edge au marché.`}]},
+  {label:`Garder la position ouverte pour le Real-Time`, tag:`Informé`, outcomes:[
+    {p:0.75, pnl:118, title:`RT à 325 $/MWh, comme anticipé`, text:`118 k$ : la déviation solaire a tendu le temps réel. C'est exactement ce que signifie "avoir une vue" : une position prise contre le consensus Day-Ahead sur la base d'une meilleure information météo.`},
+    {p:0.25, pnl:34, title:`Le vent a compensé le solaire manquant`, text:`34 k$ : la tension attendue ne s'est pas produite, une hausse éolienne ayant comblé le déficit. Une bonne analyse ne garantit pas un bon résultat.`}]},
+  {label:`Vendre la moitié, garder la moitié`, tag:`Équilibré`, outcomes:[
+    {p:0.75, pnl:63, title:`Moitié du mouvement capté`, text:`63 k$ : tu as capté la moitié de la tension. Prudent, mais tu as vendu la moitié d'un volume dont tu savais qu'il valait plus.`},
+    {p:0.25, pnl:20, title:`Pas de tension, résultat médiocre`, text:`20 k$ : ni le confort du DA, ni le gain du RT.`}]}
+ ],
+ lesson:`Convergence DA-RT : le Day-Ahead reflète l'information disponible la veille. Un desk gagne quand sa prévision météo intraday bat celle intégrée dans le clearing DA.`
+},
+{
+ id:'s7', title:`Un deuxième cycle dans la journée ?`,
+ ctx:[{k:'Spread matin',v:'110 $/MWh'},{k:'Spread soir',v:'95 $/MWh'},{k:'Dégradation',v:'~18 k$ de coût par cycle'},{k:'SOC',v:'100%'}],
+ brief:`La journée offre deux fenêtres d'arbitrage modestes. Ton contrat de garantie constructeur limite le cyclage annuel : chaque cycle supplémentaire consomme du budget et rapproche l'échéance d'augmentation.`,
+ options:[
+  {label:`Un seul cycle, sur la meilleure fenêtre`, tag:`Discipliné`, outcomes:[
+    {p:1, pnl:15, title:`15 k$ nets après coût de cycle`, text:`33 k$ de marge brute moins 18 k$ de coût de dégradation = 15 k$ nets. Le bon réflexe : raisonner en marge nette du coût d'usure, pas en revenu brut.`}]},
+  {label:`Deux cycles pour maximiser le revenu brut`, tag:`Volume`, outcomes:[
+    {p:1, pnl:11, title:`11 k$ — le second cycle détruit de la valeur`, text:`Le second cycle rapporte 29 k$ bruts pour 18 k$ de dégradation, soit +11 k$... mais rogne aussi ta capacité future. Sur un spread faible, cycler plus n'est pas cycler mieux : le revenu brut monte, la marge nette par cycle s'effondre.`}]},
+  {label:`Aucun cycle, garder la batterie disponible`, tag:`Attentiste`, outcomes:[
+    {p:0.7, pnl:0, title:`Journée blanche`, text:`0 k$ : aucune opportunité n'est venue justifier l'attente. Ne pas cycler a un coût d'opportunité bien réel.`},
+    {p:0.3, pnl:47, title:`Pic imprévu en soirée, batterie pleine`, text:`47 k$ : une contrainte réseau imprévue a fait bondir les prix à 19h et tu étais chargé à bloc. Garder de la disponibilité est parfois la meilleure option — c'est la valeur de l'optionalité.`}]}
+ ],
+ lesson:`Coût marginal du cycle : au-delà d'un certain point, le revenu marginal d'un cycle supplémentaire tombe sous son coût de dégradation. L'optimum n'est jamais "cycler au maximum".`
+},
+{
+ id:'s8', title:`Une banque te propose un TB4 swap`,
+ ctx:[{k:'Instrument',v:'TB4 swap, jambe fixe'},{k:'Niveau',v:'95 k$/jour équivalent'},{k:'Marché',v:'Volatilité élevée attendue'},{k:'Financement',v:'Dette senior à refinancer'}],
+ brief:`Une banque propose de te payer un montant fixe équivalent à 95 k$/jour contre la valeur flottante de l'indice TB4 pour le reste du mois. Tes prêteurs apprécieraient la visibilité ; ton desk de trading, beaucoup moins.`,
+ options:[
+  {label:`Signer sur 100% du volume`, tag:`Couverture totale`, setsHedge:1, outcomes:[
+    {p:1, pnl:95, title:`Revenu fixé à 95 k$/jour`, text:`Tes journées suivantes seront réglées au niveau fixe, quelle que soit la réalité du marché. Plus de mauvaise surprise — plus de bonne non plus. Attention : le swap se règle sur l'indice TB4, pas sur ta performance réelle.`}]},
+  {label:`Signer sur 50% du volume`, tag:`Hybride`, setsHedge:0.5, outcomes:[
+    {p:1, pnl:95, title:`Moitié fixe, moitié merchant`, text:`Structure hybride classique : la moitié de tes revenus futurs sera lissée vers le niveau fixe, l'autre restera exposée au marché. Le compromis le plus fréquent quand il faut rassurer des prêteurs sans tuer l'upside.`}]},
+  {label:`Refuser, rester 100% merchant`, tag:`Merchant`, setsHedge:0, outcomes:[
+    {p:1, pnl:88, title:`Journée merchant ordinaire`, text:`88 k$ sur la journée, et l'intégralité de la volatilité future conservée. Défendable si ton refinancement ne l'exige pas et si tu crois à un marché volatil.`}]}
+ ],
+ lesson:`Un TBX swap convertit un revenu flottant en revenu fixe pour la part couverte : il coupe le bas ET le haut de la distribution. Il ne couvre en revanche jamais ta performance opérationnelle.`
+},
+{
+ id:'s9', title:`Award Non-Spin avec un SOC limite`,
+ ctx:[{k:'Marché',v:'Non-Spin attractif ce soir'},{k:'SOC actuel',v:'35% (140 MWh)'},{k:'Contrainte',v:'SCED vérifie le SOC toutes les 5 min'},{k:'Prix charge',v:'62 $/MWh'}],
+ brief:`Le Non-Spin se paie bien ce soir, mais depuis RTC+B, SCED contrôle en continu que ton état de charge permet réellement d'honorer la réserve promise. Un SOC insuffisant coûte l'award — et la crédibilité.`,
+ options:[
+  {label:`Prendre l'award malgré le SOC bas`, tag:`Risqué`, outcomes:[
+    {p:0.4, pnl:34, title:`Pas d'appel, award encaissé`, text:`34 k$ : ERCOT n'a pas eu besoin de la réserve et ton SOC n'a jamais été mis à l'épreuve. Un gain qui masque le risque pris.`},
+    {p:0.6, pnl:-46, title:`SOC insuffisant : award retiré et pénalité`, text:`-46 k$ : SCED a constaté que tu ne pouvais pas soutenir la réserve annoncée. Sous RTC+B, promettre une réserve que ton état de charge ne permet pas est directement sanctionné.`}]},
+  {label:`Recharger d'abord (62 $/MWh), offrir ensuite`, tag:`Méthodique`, outcomes:[
+    {p:1, pnl:19, title:`Award tenu, coût de recharge assumé`, text:`19 k$ : le coût de recharge ampute la marge, mais la réserve est réellement livrable sur toute la fenêtre. C'est ce que le middle office attend d'un desk : des positions physiquement faisables.`}]},
+  {label:`Renoncer à l'award, garder l'énergie pour la pointe`, tag:`Focalisé`, outcomes:[
+    {p:0.55, pnl:41, title:`Pointe du soir bien valorisée`, text:`41 k$ : concentrer les 140 MWh sur la pointe a mieux payé que la réserve.`},
+    {p:0.45, pnl:12, title:`Pointe molle`, text:`12 k$ : la pointe n'a pas tenu ses promesses, et l'award auquel tu as renoncé aurait rapporté davantage.`}]}
+ ],
+ lesson:`Faisabilité SOC sous RTC+B : une offre de réserve n'est valable que si l'état de charge la rend livrable à chaque intervalle de 5 minutes. Le middle office contrôle cette cohérence.`
+},
+{
+ id:'s10', title:`Panne d'onduleur, position DA engagée`,
+ ctx:[{k:'Incident',v:'Panne partielle à 14h'},{k:'Capacité perdue',v:'60% de la puissance'},{k:'Engagement DAM',v:'300 MWh pour 18-20h'},{k:'RT attendu',v:'260 $/MWh'}],
+ brief:`Une panne d'onduleur réduit ta puissance disponible alors que tu es engagé au Day-Ahead sur 300 MWh pour la pointe du soir. Tout volume non livré sera racheté au prix Real-Time, qui s'annonce élevé.`,
+ options:[
+  {label:`Racheter immédiatement la position en Day-Ahead ajusté`, tag:`Discipliné`, outcomes:[
+    {p:1, pnl:-31, title:`Perte connue et bornée : -31 k$`, text:`-31 k$ : tu solde ta position pendant que le marché est encore calme. Une perte immédiate et certaine vaut souvent mieux qu'une exposition ouverte sur un incident non résolu.`}]},
+  {label:`Attendre : la réparation est peut-être rapide`, tag:`Pari`, outcomes:[
+    {p:0.35, pnl:64, title:`Réparation à 17h, position honorée`, text:`64 k$ : l'équipe a rétabli la puissance à temps. Le pari a payé — cette fois.`},
+    {p:0.65, pnl:-142, title:`Toujours en panne : rachat au prix du pic`, text:`-142 k$ : tu as racheté ton engagement au plus mauvais moment, en plein pic à 480 $/MWh. C'est le règlement d'imbalance dans sa version la plus douloureuse.`}]},
+  {label:`Déclarer l'indisponibilité et racheter partiellement`, tag:`Mixte`, outcomes:[
+    {p:0.65, pnl:-58, title:`Exposition réduite, perte contenue`, text:`-58 k$ : en déclarant l'indisponibilité et en rachetant la moitié, tu limites l'exposition restante. La transparence opérationnelle vis-à-vis d'ERCOT réduit aussi le risque de pénalité.`},
+    {p:0.35, pnl:2, title:`Réparation rapide, exposition résiduelle rentable`, text:`2 k$ : le rachat partiel a coûté, mais la remise en service a permis d'honorer le reste.`}]}
+ ],
+ lesson:`Imbalance : tout écart entre l'engagement Day-Ahead et la livraison réelle se règle au prix Real-Time. Un incident physique devient immédiatement une position de marché à gérer.`
+},
+{
+ id:'s11', title:`Le PUCT revoit le plafond de prix`,
+ ctx:[{k:'Régulateur',v:'Consultation ouverte au PUCT'},{k:'Enjeu',v:'Plafond RT (2 000 $/MWh)'},{k:'Ton book',v:'Fortement merchant'},{k:'Horizon',v:'Décision sous 3 mois'}],
+ brief:`Le régulateur texan ouvre une consultation sur le plafond de prix en temps réel. Une baisse réduirait mécaniquement la valeur des journées de rareté sur lesquelles repose une partie de ton business plan.`,
+ options:[
+  {label:`Ne rien changer, attendre la décision`, tag:`Statu quo`, outcomes:[
+    {p:0.5, pnl:78, title:`Statu quo réglementaire`, text:`78 k$ : la consultation n'a rien changé pour l'instant, et ton exposition reste intacte.`},
+    {p:0.5, pnl:-24, title:`Le marché price déjà la baisse`, text:`-24 k$ : les forwards se sont ajustés à la baisse par anticipation. Le risque réglementaire se matérialise souvent dans les prix avant la décision elle-même.`}]},
+  {label:`Réduire l'exposition merchant sur les mois concernés`, tag:`Prudent`, outcomes:[
+    {p:1, pnl:41, title:`Exposition allégée, revenu lissé`, text:`41 k$ : moins d'upside si rien ne change, mais un book qui ne dépend plus d'une décision administrative. Un arbitrage classique de risk management.`}]},
+  {label:`Renforcer la position : le marché sur-réagit`, tag:`Contrarien`, outcomes:[
+    {p:0.4, pnl:186, title:`Le plafond est maintenu, tu encaisses`, text:`186 k$ : la consultation s'est conclue sans changement et tu as acheté de la volatilité bon marché.`},
+    {p:0.6, pnl:-96, title:`La baisse est confirmée`, text:`-96 k$ : le plafond a été abaissé et ta position renforcée en a payé le prix. Prendre une vue sur une décision réglementaire, c'est trader un risque que l'analyse fondamentale ne couvre pas.`}]}
+ ],
+ lesson:`Risque réglementaire : une décision du PUCT ou d'ERCOT redéfinit l'enveloppe de revenu d'un actif sans qu'aucun fondamental physique n'ait bougé. Il se suit en veille, pas en modèle de prix.`
+},
+{
+ id:'s12', title:`Duck curve : la rampe du soir`,
+ ctx:[{k:'Solaire',v:'Record de production à midi'},{k:'Prix midi',v:'8 $/MWh'},{k:'Rampe',v:'18h-21h, +18 GW de charge nette'},{k:'Durée batterie',v:'4h'}],
+ brief:`Le solaire écrase les prix de milieu de journée, et la rampe du soir s'annonce brutale. Toute la question est de savoir sur quelle fenêtre concentrer tes 400 MWh — et si ta durée de 4h est un atout ou une contrainte.`,
+ options:[
+  {label:`Charger à midi, décharger sur les 2h de pointe maximale`, tag:`Concentré`, outcomes:[
+    {p:0.6, pnl:97, title:`Pic bien ciblé à 19h30`, text:`97 k$ : concentrer la puissance sur le sommet de la rampe maximise le prix moyen de décharge. Encore faut-il viser juste.`},
+    {p:0.4, pnl:52, title:`Le pic est arrivé plus tard que prévu`, text:`52 k$ : tu as déchargé avant le vrai sommet. Concentrer, c'est aussi augmenter le coût d'une erreur de timing.`}]},
+  {label:`Charger à midi, étaler la décharge sur les 4h de rampe`, tag:`Étalé`, outcomes:[
+    {p:1, pnl:84, title:`84 k$, quasi indépendant du timing`, text:`84 k$ : étaler sur toute la rampe capture un prix moyen légèrement inférieur au pic, mais rend le résultat robuste à une erreur de prévision d'une heure ou deux. C'est l'intérêt d'une durée de 4h.`}]},
+  {label:`Ne pas charger à midi, garder la marge de manœuvre`, tag:`Attentiste`, outcomes:[
+    {p:1, pnl:6, title:`6 k$ — l'occasion manquée du jour`, text:`6 k$ : refuser de charger à 8 $/MWh avant une rampe annoncée revient à renoncer au spread le plus prévisible du marché texan.`}]}
+ ],
+ lesson:`Duck curve : plus la pénétration solaire est forte, plus la rampe du soir est ample — et plus une durée longue (4h) devient un avantage, à la fois en revenu et en robustesse au timing.`
+}
+];
+
+/* =========================================================
    STATE / PERSISTENCE
    ========================================================= */
 var STORAGE_KEY = 'battery-desk-drill-v1';
@@ -800,6 +1054,113 @@ function startSession(queue, label){
 }
 
 /* =========================================================
+   GAME ENGINE — PnL Maker
+   ========================================================= */
+var GAME_LEN = 10;
+var RISK_LIMIT = -400;      // k$ : sous ce seuil, le risk management coupe les limites
+var HEDGE_FIXED = 95;       // k$/jour : jambe fixe du TB4 swap
+var QUIZ_BONUS = 80;
+var QUIZ_MALUS = -60;
+var BEST_KEY = 'battery-desk-drill-best-v1';
+var game = null;
+
+function getBest(){
+  try{ return parseInt(localStorage.getItem(BEST_KEY) || '0', 10) || 0; }catch(e){ return 0; }
+}
+function saveBest(){
+  try{ if(game && game.pnl > getBest()) localStorage.setItem(BEST_KEY, String(game.pnl)); }catch(e){}
+}
+function pickOutcome(outcomes){
+  var r = Math.random(), acc = 0;
+  for(var i=0;i<outcomes.length;i++){
+    acc += outcomes[i].p;
+    if(r <= acc) return outcomes[i];
+  }
+  return outcomes[outcomes.length-1];
+}
+function pickGameQuestion(){
+  var due = reviewQueue();
+  var pool = due.length ? due : QUESTIONS.filter(function(q){ return !entry(q.id).attempted; });
+  if(!pool.length) pool = QUESTIONS;
+  return shuffle(pool)[0];
+}
+function gameStart(){
+  var pool = shuffle(GAME_SCENARIOS), si = 0, plan = [];
+  for(var d=1; d<=GAME_LEN; d++){
+    if(d % 3 === 0) plan.push({type:'quiz'});
+    else plan.push({type:'market', scenario: pool[si++ % pool.length]});
+  }
+  game = {plan:plan, day:0, pnl:0, history:[], hedgeRatio:0, phase:'brief', result:null, chosen:-1, busted:false};
+  if(plan[0].type === 'quiz') plan[0].question = pickGameQuestion();
+  app.view = 'game';
+  render();
+}
+function applyHedge(raw){
+  if(!game.hedgeRatio) return raw;
+  return Math.round(HEDGE_FIXED*game.hedgeRatio + raw*(1 - game.hedgeRatio));
+}
+function gameChoose(i){
+  if(!game || game.phase !== 'brief') return;
+  var round = game.plan[game.day];
+  if(round.type !== 'market') return;
+  var opt = round.scenario.options[i];
+  var out = pickOutcome(opt.outcomes);
+  var applied = (opt.setsHedge === undefined) ? applyHedge(out.pnl) : out.pnl;
+  if(opt.setsHedge !== undefined) game.hedgeRatio = opt.setsHedge;
+  game.pnl += applied;
+  game.history.push(applied);
+  game.chosen = i;
+  game.result = {out:out, raw:out.pnl, applied:applied, hedged:(applied !== out.pnl)};
+  game.phase = 'result';
+  if(game.pnl <= RISK_LIMIT) game.busted = true;
+  render();
+}
+function gameAnswerQuiz(i){
+  if(!game || game.phase !== 'brief') return;
+  var round = game.plan[game.day];
+  if(round.type !== 'quiz') return;
+  var q = round.question;
+  var ok = (i === q.correct);
+  record(q.id, ok);
+  var delta = ok ? QUIZ_BONUS : QUIZ_MALUS;
+  game.pnl += delta;
+  game.history.push(delta);
+  game.chosen = i;
+  game.result = {quiz:true, ok:ok, delta:delta, q:q};
+  game.phase = 'result';
+  if(game.pnl <= RISK_LIMIT) game.busted = true;
+  render();
+}
+function gameNext(){
+  if(!game) return;
+  if(game.busted || game.day >= GAME_LEN - 1){
+    game.phase = 'end';
+    saveBest();
+    render();
+    return;
+  }
+  game.day++;
+  game.phase = 'brief';
+  game.chosen = -1;
+  game.result = null;
+  if(game.plan[game.day].type === 'quiz') game.plan[game.day].question = pickGameQuestion();
+  render();
+}
+function gameAction(a){
+  if(a === 'start' || a === 'restart'){ gameStart(); return; }
+  if(a === 'next'){ gameNext(); return; }
+  if(a === 'quit'){ game = null; app.view = 'dashboard'; render(); return; }
+}
+function gameGrade(pnl){
+  if(pnl <= RISK_LIMIT) return {title:'Limites coupées', text:`Le risk management a fermé le book. Ce n'est pas une fin de carrière : relis les débriefs, la plupart des pertes viennent de positions ouvertes non couvertes sur un risque identifiable à l'avance.`};
+  if(pnl < 0) return {title:'Mois dans le rouge', text:`Le desk a perdu de l'argent. Regarde quelles journées ont le plus coûté : sur ce jeu, ce sont presque toujours celles où une exposition non couverte rencontre un événement prévisible.`};
+  if(pnl < 400) return {title:'Junior analyst', text:`Tu survis, mais tu laisses beaucoup de valeur sur la table. Travaille l'arbitrage entre sécurisation Day-Ahead et exposition Real-Time.`};
+  if(pnl < 800) return {title:'Analyst confirmé', text:`Résultat solide. Tu sécurises quand il faut et tu gardes de l'exposition quand l'information le justifie.`};
+  if(pnl < 1500) return {title:'Trader', text:`Très bon mois. Tu exploites les asymétries (météo, congestion, rampe) sans exposer le book aux pertes extrêmes.`};
+  return {title:'Head of Storage Desk', text:`Performance remarquable — vérifie simplement que la chance n'y est pas pour trop : rejoue une session pour confirmer que la méthode tient.`};
+}
+
+/* =========================================================
    RENDER
    ========================================================= */
 function render(){
@@ -808,9 +1169,9 @@ function render(){
   var c = document.getElementById('content');
   if(app.view === 'dashboard') c.innerHTML = viewDashboard();
   else if(app.view === 'reference') c.innerHTML = viewReference();
+  else if(app.view === 'game') c.innerHTML = viewGame();
   else if(app.view === 'quiz') c.innerHTML = viewQuiz();
   else if(app.view === 'summary') c.innerHTML = viewSummary();
-  bindContentEvents();
 }
 
 function renderTopStats(){
@@ -837,6 +1198,7 @@ function renderRail(){
   var html = '';
   html += '<div class="rail-section-label">Vue</div>';
   html += railBtn({nav:'dashboard', ticker:'HOME', label:'Dashboard', active: app.view==='dashboard'});
+  html += railBtn({nav:'game', ticker:'JEU', label:'PnL Maker', meta:'Simulation de trading', cls:'game', active: app.view==='game'});
   html += railBtn({nav:'reference', ticker:'REF', label:'Fiches contrats', active: app.view==='reference'});
   html += '<div class="rail-section-label">Thèmes</div>';
   THEMES.filter(function(t){return t.key!=='cases';}).forEach(function(t){
@@ -877,7 +1239,8 @@ function viewDashboard(){
   '</div>';
 
   html += '<div class="actions-row">';
-  html += '<button class="btn btn-primary" data-nav="review">Réviser mes erreurs (' + reviewQueue().length + ')</button>';
+  html += '<button class="btn btn-primary" data-nav="game">Jouer — PnL Maker</button>';
+  html += '<button class="btn" data-nav="review">Réviser mes erreurs (' + reviewQueue().length + ')</button>';
   html += '<button class="btn" data-nav="exam">Examen blanc — 20 questions</button>';
   html += '<button class="btn btn-ghost" data-nav="reference">Ouvrir les fiches contrats</button>';
   html += '</div>';
@@ -919,6 +1282,136 @@ function viewReference(){
 
   html += '<p class="disclaimer">Les ordres de grandeur et faits de marché (plafonds de prix, RTC+B, revenus AS) cités dans cette appli sont sourcés sur des données publiques 2024-2026 (ERCOT, PUCT, presse spécialisée du secteur) et donnés à titre pédagogique — validez toujours les chiffres et la terminologie exacte avec votre desk avant de les citer en réunion.</p>';
   return html;
+}
+
+function fmtK(v){
+  return (v > 0 ? '+' : (v < 0 ? '−' : '')) + Math.abs(v).toLocaleString('fr-FR') + ' k$';
+}
+function gameSpark(){
+  if(!game.history.length) return '';
+  var max = Math.max.apply(null, game.history.map(function(v){ return Math.abs(v); })) || 1;
+  return '<div class="spark">' + game.history.map(function(v){
+    var h = Math.max(6, Math.round(100*Math.abs(v)/max));
+    return '<span class="'+(v<0?'neg':'')+'" style="height:'+h+'%"></span>';
+  }).join('') + '</div>';
+}
+function gameHud(){
+  var riskUsed = game.pnl < 0 ? Math.min(100, Math.round(100*Math.abs(game.pnl)/Math.abs(RISK_LIMIT))) : 0;
+  var hedgeTxt = game.hedgeRatio ? (Math.round(game.hedgeRatio*100) + '% couvert (TB4)') : 'Merchant intégral';
+  return '<div class="game-hud">' +
+    '<div class="hud-box"><span class="hud-label">P&L cumulé</span>' +
+      '<div class="hud-value '+(game.pnl>0?'pos':(game.pnl<0?'neg':''))+'">'+fmtK(game.pnl)+'</div>' + gameSpark() + '</div>' +
+    '<div class="hud-box"><span class="hud-label">Journée</span><div class="hud-value">'+(game.day+1)+' / '+GAME_LEN+'</div>' +
+      '<span class="hud-sub">'+hedgeTxt+'</span></div>' +
+    '<div class="hud-box"><span class="hud-label">Limite de risque</span><div class="hud-value">'+fmtK(RISK_LIMIT)+'</div>' +
+      '<div class="risk-meter"><span style="width:'+riskUsed+'%"></span></div></div>' +
+  '</div>';
+}
+function viewGame(){
+  if(!game){
+    var best = getBest();
+    return '<div class="hero"><div><h1>PnL Maker — 10 journées de trading</h1>' +
+      '<p>Tu pilotes une batterie de 100 MW / 400 MWh sur un nœud ouest d\'ERCOT. Chaque journée apporte sa météo, ses prix et ses incidents : tu choisis une stratégie, le marché tranche, le P&L suit. Trois « comités des risques » viennent tester tes connaissances en cours de mois — bonne réponse, bonus ; mauvaise réponse, la question part dans ta file de révision.</p></div></div>' +
+      '<div class="card"><h3 style="margin:0 0 10px;font-size:1rem;">Règles</h3>' +
+        '<ul style="margin:0 0 4px;padding-left:18px;font-size:.9rem;line-height:1.65;">' +
+        '<li>P&L en <strong>k$</strong>, net du coût de charge, pour l\'actif entier.</li>' +
+        '<li>Les résultats sont <strong>stochastiques</strong> : une bonne décision peut mal finir, une mauvaise peut passer. C\'est le métier.</li>' +
+        '<li>Si le P&L cumulé descend sous <strong>'+fmtK(RISK_LIMIT)+'</strong>, le risk management coupe les limites et la session s\'arrête.</li>' +
+        '<li>Signer un <strong>TB4 swap</strong> en cours de partie lisse toutes les journées suivantes vers la jambe fixe — protection et plafonnement compris.</li>' +
+        '</ul></div>' +
+      '<div class="actions-row"><button class="btn btn-primary" data-game="start">Démarrer une session</button>' +
+      (best ? '<span class="pill mono">Meilleur score : '+fmtK(best)+'</span>' : '') + '</div>';
+  }
+
+  if(game.phase === 'end'){
+    var g = gameGrade(game.pnl);
+    var best = getBest();
+    var wins = game.history.filter(function(v){ return v > 0; }).length;
+    var html = '<div class="hero"><div><h1>'+esc(g.title)+'</h1><p>'+esc(g.text)+'</p></div>'+ring(Math.max(0, Math.min(100, Math.round(100*game.pnl/2000))))+'</div>';
+    html += '<div class="summary-stats">' +
+      '<div class="stat-box '+(game.pnl>=0?'good':'bad')+'"><div class="stat-num mono">'+fmtK(game.pnl)+'</div><div class="stat-label">P&L final</div></div>' +
+      '<div class="stat-box"><div class="stat-num mono">'+wins+' / '+game.history.length+'</div><div class="stat-label">Journées positives</div></div>' +
+      '<div class="stat-box"><div class="stat-num mono">'+fmtK(Math.max.apply(null, game.history.concat([0])))+'</div><div class="stat-label">Meilleure journée</div></div>' +
+      '<div class="stat-box"><div class="stat-num mono">'+fmtK(Math.min.apply(null, game.history.concat([0])))+'</div><div class="stat-label">Pire journée</div></div>' +
+    '</div>';
+    if(best) html += '<p class="disclaimer">Meilleur score enregistré sur cet appareil : '+fmtK(best)+'.</p>';
+    var due = reviewQueue().length;
+    if(due) html += '<p class="disclaimer">'+due+' question'+(due>1?'s':'')+' en attente dans ta file de révision — les erreurs du comité des risques y ont été ajoutées.</p>';
+    html += '<div class="actions-row"><button class="btn btn-primary" data-game="restart">Rejouer une session</button>' +
+      (due ? '<button class="btn" data-nav="review">Réviser mes erreurs</button>' : '') +
+      '<button class="btn btn-ghost" data-nav="dashboard">Retour au dashboard</button></div>';
+    return html;
+  }
+
+  var round = game.plan[game.day];
+  var html = gameHud();
+
+  if(round.type === 'quiz'){
+    var q = round.question;
+    html += '<div class="card"><span class="quiz-chip">COMITÉ DES RISQUES · '+THEME_BY_KEY[q.theme].ticker+'</span>';
+    html += '<p class="qtext" style="margin-top:14px;">'+esc(q.q)+'</p>';
+    if(q.scenario) html += '<div class="scenario"><span class="label mono">CONTEXTE</span>'+esc(q.scenario)+'</div>';
+    html += '<div class="options">';
+    var letters = ['A','B','C','D'];
+    q.options.forEach(function(opt, i){
+      var cls = 'option';
+      if(game.phase === 'result'){
+        if(i === q.correct) cls += ' correct';
+        else if(i === game.chosen) cls += ' wrong';
+        else cls += ' dim';
+      }
+      html += '<button class="'+cls+'" data-gq="'+i+'"'+(game.phase==='result'?' disabled':'')+'>' +
+        '<span class="oletter">'+letters[i]+'</span><span>'+esc(opt)+'</span></button>';
+    });
+    html += '</div>';
+    if(game.phase === 'result'){
+      html += '<div class="resolution">' +
+        '<div class="pnl-delta '+(game.result.delta>0?'pos':'neg')+'">'+fmtK(game.result.delta)+'</div>' +
+        '<p style="margin:6px 0 0;font-size:.9rem;"><strong>'+(game.result.ok?'Bonne réponse.':'Réponse incorrecte — la question rejoint ta file de révision.')+'</strong> '+esc(q.explain)+'</p>' +
+      '</div>';
+      html += gameFoot();
+    }
+    html += '</div>';
+    return html;
+  }
+
+  var sc = round.scenario;
+  html += '<div class="card">';
+  html += '<span class="quiz-chip">JOUR '+(game.day+1)+' · MARCHÉ</span>';
+  html += '<h2 style="margin:12px 0 0;font-size:1.25rem;">'+esc(sc.title)+'</h2>';
+  html += '<div class="ctx-grid">' + sc.ctx.map(function(c){
+    return '<div class="ctx-item"><span class="k">'+esc(c.k)+'</span><span class="v">'+esc(c.v)+'</span></div>';
+  }).join('') + '</div>';
+  html += '<p style="font-size:.95rem;margin:0 0 18px;">'+esc(sc.brief)+'</p>';
+  html += '<div class="options">';
+  sc.options.forEach(function(opt, i){
+    var cls = 'choice';
+    if(game.phase === 'result') cls += (i === game.chosen ? ' chosen' : ' dim');
+    html += '<button class="'+cls+'" data-choice="'+i+'"'+(game.phase==='result'?' disabled':'')+'>' +
+      '<span class="ctag">'+esc(opt.tag)+'</span><span class="ctitle">'+esc(opt.label)+'</span></button>';
+  });
+  html += '</div>';
+
+  if(game.phase === 'result'){
+    var r = game.result;
+    html += '<div class="resolution">' +
+      '<div class="pnl-delta '+(r.applied>=0?'pos':'neg')+'">'+fmtK(r.applied)+'</div>' +
+      '<p style="margin:4px 0 8px;font-weight:600;font-family:\'Archivo\',sans-serif;font-size:.94rem;">'+esc(r.out.title)+'</p>' +
+      '<p style="margin:0;font-size:.9rem;">'+esc(r.out.text)+'</p>' +
+      (r.hedged ? '<p style="margin:8px 0 0;font-size:.85rem;color:var(--teal);">Effet du TB4 swap : résultat de marché '+fmtK(r.raw)+' lissé à '+fmtK(r.applied)+' par la jambe fixe.</p>' : '') +
+      '<div class="lesson"><strong>À retenir —</strong> '+esc(sc.lesson)+'</div>' +
+    '</div>';
+    html += gameFoot();
+  }
+  html += '</div>';
+  return html;
+}
+function gameFoot(){
+  if(game.busted){
+    return '<div class="quiz-foot"><button class="btn btn-primary" data-game="next">Voir le bilan (limites coupées)</button></div>';
+  }
+  var last = game.day >= GAME_LEN - 1;
+  return '<div class="quiz-foot"><button class="btn btn-primary" data-game="next">'+(last?'Voir le bilan du mois':'Journée suivante')+'</button></div>';
 }
 
 function viewQuiz(){
@@ -980,6 +1473,7 @@ function viewSummary(){
 function goNav(nav){
   if(nav === 'dashboard'){ app.view='dashboard'; render(); return; }
   if(nav === 'reference'){ app.view='reference'; render(); return; }
+  if(nav === 'game'){ app.view='game'; render(); return; }
   if(nav === 'review'){
     var q = reviewQueue();
     if(q.length===0){ app.view='dashboard'; render(); flashEmpty(); return; }
@@ -1009,19 +1503,50 @@ function flashEmpty(){
   c.prepend(note);
 }
 
-function bindContentEvents(){
-  document.querySelectorAll('[data-nav]').forEach(function(el){
-    el.addEventListener('click', function(){ goNav(el.getAttribute('data-nav')); });
-  });
-  var due = document.getElementById('dueBtn');
-  if(due) due.addEventListener('click', function(){ goNav('review'); });
+/* One delegated listener: survives every innerHTML rebuild of the rail, HUD and content. */
+document.addEventListener('click', function(e){
+  var t = e.target;
+  if(!t || !t.closest) return;
 
-  if(app.view === 'quiz'){
-    document.querySelectorAll('.option').forEach(function(btn){
-      btn.addEventListener('click', function(){ answerQuestion(parseInt(btn.getAttribute('data-i'),10)); });
-    });
+  var nav = t.closest('[data-nav]');
+  if(nav){ goNav(nav.getAttribute('data-nav')); return; }
+
+  if(t.closest('#dueBtn')){ goNav('review'); return; }
+
+  var opt = t.closest('.option');
+  if(opt && app.view === 'quiz' && !opt.disabled){
+    answerQuestion(parseInt(opt.getAttribute('data-i'), 10));
+    return;
   }
-}
+
+  if(t.closest('[data-quiz="next"]')){
+    if(session.index >= session.queue.length - 1){ app.view = 'summary'; }
+    else { session.index++; session.answered = false; }
+    render();
+    return;
+  }
+
+  var gameEl = t.closest('[data-game]');
+  if(gameEl){ gameAction(gameEl.getAttribute('data-game')); return; }
+
+  var choice = t.closest('[data-choice]');
+  if(choice && !choice.disabled){ gameChoose(parseInt(choice.getAttribute('data-choice'), 10)); return; }
+
+  var gq = t.closest('[data-gq]');
+  if(gq && !gq.disabled){ gameAnswerQuiz(parseInt(gq.getAttribute('data-gq'), 10)); return; }
+
+  if(t.closest('#resetBtn')){
+    if(confirm('Réinitialiser toute votre progression et votre historique de révision ?')){
+      progress = {};
+      saveProgress();
+      app.view = 'dashboard';
+      session = null;
+      game = null;
+      render();
+    }
+    return;
+  }
+});
 
 function answerQuestion(i){
   if(session.answered) return;
@@ -1050,28 +1575,11 @@ function answerQuestion(i){
 
   var isLast = session.index >= session.queue.length - 1;
   var foot = document.getElementById('quizFoot');
-  foot.innerHTML = '<button class="btn btn-primary" id="nextBtn">'+(isLast?'Voir les résultats':'Question suivante')+'</button>';
-  document.getElementById('nextBtn').addEventListener('click', function(){
-    if(isLast){ app.view = 'summary'; render(); }
-    else { session.index++; session.answered = false; render(); }
-  });
+  foot.innerHTML = '<button class="btn btn-primary" data-quiz="next">'+(isLast?'Voir les résultats':'Question suivante')+'</button>';
 
   renderTopStats();
   renderRail();
 }
-
-/* =========================================================
-   RESET
-   ========================================================= */
-document.getElementById('resetBtn').addEventListener('click', function(){
-  if(confirm('Réinitialiser toute votre progression et votre historique de révision ?')){
-    progress = {};
-    saveProgress();
-    app.view = 'dashboard';
-    session = null;
-    render();
-  }
-});
 
 render();
 })();
