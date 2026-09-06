@@ -460,6 +460,57 @@
     background:var(--surface);border:1px solid var(--border);
   }
 
+
+  /* ---------- Système Texas ---------- */
+  :root{
+    --f-wind:#009086; --f-solar:#b25a10; --f-gas:#5a4fcf; --f-bess:#a03e78;
+    --tone1:#dcebe8; --tone2:#a9d3cd; --tone3:#5fa8a0; --tone4:#b25a10; --tone5:#7c2d12;
+    --tx-fill:#e4eae7; --tx-stroke:#b9c6c1;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --f-wind:#12a094; --f-solar:#c9802c; --f-gas:#7d78dd; --f-bess:#c2609a;
+      --tone1:#1d3330; --tone2:#2b5750; --tone3:#3f8f85; --tone4:#c9802c; --tone5:#e06a3a;
+      --tx-fill:#16262a; --tx-stroke:#2e4448;
+    }
+  }
+  :root[data-theme="dark"]{
+    --f-wind:#12a094; --f-solar:#c9802c; --f-gas:#7d78dd; --f-bess:#c2609a;
+    --tone1:#1d3330; --tone2:#2b5750; --tone3:#3f8f85; --tone4:#c9802c; --tone5:#e06a3a;
+    --tx-fill:#16262a; --tx-stroke:#2e4448;
+  }
+  .map-svg{max-height:340px;}
+  .tx-outline{fill:var(--tx-fill);stroke:var(--tx-stroke);stroke-width:0.8;stroke-linejoin:round;}
+  .zone-dot{stroke:var(--surface);stroke-width:0.7;}
+  .tone-neg{fill:#4b5563;}
+  .tone-s1{fill:var(--tone1);} .tone-s2{fill:var(--tone2);} .tone-s3{fill:var(--tone3);}
+  .tone-s4{fill:var(--tone4);} .tone-s5{fill:var(--tone5);}
+  .zone-name{fill:var(--text);font-family:'Archivo',sans-serif;font-size:3.1px;font-weight:700;}
+  .zone-meta{fill:var(--text-muted);font-family:'IBM Plex Mono',monospace;font-size:2.5px;}
+  .zone-asset{fill:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:2.5px;}
+  .sw-dot{width:10px;height:10px;border-radius:50%;}
+  .sw-dot.tone-s1{background:var(--tone1);} .sw-dot.tone-s3{background:var(--tone3);} .sw-dot.tone-s5{background:var(--tone5);}
+  .stack{stroke:var(--surface);stroke-width:0.6;}
+  .stack.f-wind{fill:var(--f-wind);opacity:.85;}
+  .stack.f-solar{fill:var(--f-solar);opacity:.85;}
+  .stack.f-gas{fill:var(--f-gas);opacity:.75;}
+  .sw-band.f-wind{background:var(--f-wind);opacity:.85;}
+  .sw-band.f-solar{background:var(--f-solar);opacity:.85;}
+  .sw-band.f-gas{background:var(--f-gas);opacity:.75;}
+  .load-line{fill:none;stroke:var(--viz-line);stroke-width:2;stroke-dasharray:4 3;}
+  .sw-line.load{background:linear-gradient(90deg,var(--viz-line) 60%,transparent 60%);background-size:6px 2px;}
+  .asset-bars{margin-top:14px;display:flex;flex-direction:column;gap:6px;}
+  .abar{display:grid;grid-template-columns:88px 1fr 76px;gap:10px;align-items:center;font-size:.82rem;}
+  .abar .an{color:var(--text-muted);}
+  .abar .atrack{height:10px;background:var(--surface-2);border-radius:5px;overflow:hidden;}
+  .abar .afill{display:block;height:100%;border-radius:5px;}
+  .abar .afill.pos{background:var(--good);}
+  .abar .afill.neg{background:var(--bad);}
+  .abar .av{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;}
+  .abar .av.pos{color:var(--good);} .abar .av.neg{color:var(--bad);}
+  .abar.total{border-top:1px solid var(--border);padding-top:8px;margin-top:2px;}
+  .abar.total .an{color:var(--text);font-weight:700;}
+
   /* ---------- Responsive (kept last so it wins over the base rules above) ---------- */
   @media (max-width:820px){
     .layout{grid-template-columns:1fr;}
@@ -1324,6 +1375,473 @@ function startSession(queue, label){
 }
 
 /* =========================================================
+   JEU 2 — "Système Texas" : portefeuille multi-actifs sur ERCOT
+   ---------------------------------------------------------
+   Le prix n'est PAS écrit : il émerge du merit order.
+     résiduel = charge − éolien − solaire
+     prix     = f(résiduel, prix du gaz, heat rate marginal)
+   C'est le lien gaz-élec réel : le gaz fixe le prix quand il est
+   marginal, les renouvelables effacent du résiduel et écrasent le prix,
+   la rareté ajoute une prime convexe quand le parc pilotable sature.
+   ========================================================= */
+var PORTFOLIO = [
+  {id:'ccgt',  name:'CCGT Houston',      short:'CCGT',    mw:400, zone:'houston', hr:7.2, vom:3},
+  {id:'wind',  name:'Parc éolien West',  short:'Éolien',  mw:300, zone:'west'},
+  {id:'solar', name:'Ferme solaire South',short:'Solaire', mw:200, zone:'south'},
+  {id:'bess',  name:'BESS Houston',      short:'Batterie',mw:100, zone:'houston', mwh:400, rte:0.87}
+];
+
+var FIRM_CAP = 80; /* GW de capacité pilotable ERCOT (gaz, charbon, nucléaire) */
+
+/* Prix horaire à partir du résiduel : heat rate marginal croissant + prime de rareté. */
+function priceFromResidual(res, gas){
+  var util = res / FIRM_CAP;
+  if(util <= 0.04) return -18;                       /* surplus renouvelable : prix négatif */
+  var hr = 6.8 + 5.2*Math.pow(Math.max(0, util), 3); /* CCGT efficace → pointe → peaker */
+  var p = gas * hr;
+  if(util > 0.88) p += 900 * Math.pow((util - 0.88)/0.12, 2); /* rareté convexe */
+  return Math.round(Math.max(-18, Math.min(p, 2000)));
+}
+
+/* Profils horaires normalisés (0-1 pour les facteurs de charge, GW pour la charge). */
+function solarShape(h, peak){
+  if(h < 6 || h > 20) return 0;
+  var v = Math.sin(Math.PI * (h - 6) / 14);
+  return Math.max(0, peak * Math.pow(v, 1.15));
+}
+function windShape(h, night, day, peakH){
+  var v = night + (day - night) * 0.5 * (1 + Math.cos(Math.PI * (h - peakH) / 12));
+  return Math.max(0.02, Math.min(0.98, v));
+}
+function loadShape(h, base, peak, peakH, morning){
+  var evening = Math.exp(-Math.pow(h - peakH, 2) / 12);
+  var morn = morning * Math.exp(-Math.pow(h - 7.5, 2) / 8);
+  return base + (peak - base) * Math.max(evening, morn);
+}
+
+/* Zones ERCOT : position sur la carte (0-100) pour le rendu SVG. */
+var ZONES = [
+  {id:'panhandle', name:'Panhandle',      x:34, y:16},
+  {id:'west',      name:'West / Permian', x:24, y:38},
+  {id:'north',     name:'North (DFW)',    x:57, y:31},
+  {id:'houston',   name:'Houston / Côte', x:66, y:48},
+  {id:'south',     name:'South',          x:47, y:63}
+];
+
+var SYS_SCENARIOS = [
+{
+ id:'sum-heat', season:'Été', title:`Canicule, vent absent`,
+ ctx:[{k:'Charge',v:'pointe 88 GW, record'},{k:'Gaz',v:'3,60 $/MMBtu'},{k:'Vent',v:'très faible tout le jour'},{k:'Solaire',v:'excellent jusqu\'à 19h'}],
+ gas:3.6,
+ profile:{base:56, peak:88, peakH:18, morning:0.35, solarPeak:0.92, windNight:0.13, windDay:0.07, windPeakH:3},
+ zones:{panhandle:{w:'Vent 3 m/s', t:'37 °C'}, west:{w:'Vent 2 m/s', t:'41 °C'}, north:{w:'Vent 4 m/s', t:'38 °C'}, houston:{w:'Humide, sans vent', t:'39 °C'}, south:{w:'Solaire fort', t:'40 °C'}},
+ brief:`Regarde la pile de production : le solaire tient la journée, mais il s'efface à partir de 18h alors que la charge est encore à son maximum. Le résiduel explose sur la rampe du soir, et c'est ta CCGT et ta batterie qui doivent la couvrir. Ton éolien, lui, ne produit presque rien — un jour de canicule texane sans vent est exactement le moment où le parc éolien ne t'aide pas.`,
+ realizations:[
+  {id:'tight', p:0.55, name:`Rampe du soir très tendue`, mod:{loadScale:1.03}, text:`La charge a dépassé la prévision de 3% et le résiduel du soir a poussé le prix bien au-delà du coût variable de la CCGT : la prime de rareté s'est ajoutée.`},
+  {id:'ok', p:0.45, name:`Le système absorbe la pointe`, mod:{}, text:`La pointe est passée sans stress : le prix est resté proche du coût marginal de la CCGT, soit environ le prix du gaz multiplié par le heat rate.`}
+ ],
+ options:[
+  {label:`Tout merchant : CCGT sur le spark spread, batterie sur l'arbitrage`, tag:`Merchant`, effect:{},
+   why:`Un jour de canicule sans vent, tout ton portefeuille pilotable est exactement là où la valeur se trouve : la rampe du soir. Ne rien couvrir maximise l'espérance, à condition d'accepter la variance de la rareté.`},
+  {label:`Vendre la pointe CCGT en Day-Ahead (couverture intrajournalière)`, tag:`Sécurisé`, effect:{ccgtDA:true},
+   why:`Verrouille le spark spread du soir au prix Day-Ahead. Tu renonces à la prime de rareté du Real-Time, qui est précisément la raison d'être d'une CCGT de pointe un jour comme celui-ci.`},
+  {label:`Pousser la batterie à deux cycles (matin + soir)`, tag:`Cyclage`, effect:{bessCycles:2},
+   why:`Le second cycle du matin capture un spread bien plus faible que celui du soir et ajoute 18 k$ de dégradation. Sur une journée à pointe unique, un seul cycle bien placé domine.`}
+ ],
+ lesson:`Sans vent, le résiduel du soir est couvert par le gaz : le prix se forme à « prix du gaz × heat rate marginal », plus une prime de rareté quand le parc pilotable sature. C'est le lien gaz-élec dans sa forme la plus directe.`
+},
+{
+ id:'win-storm', season:'Hiver', title:`Tempête glaciale et freeze-off gazier`,
+ ctx:[{k:'Charge',v:'pointe matinale 78 GW'},{k:'Gaz',v:'9,00 $/MMBtu, en hausse'},{k:'Vent',v:'turbines givrées'},{k:'Risque',v:'gel des têtes de puits'}],
+ gas:9,
+ profile:{base:58, peak:78, peakH:8, morning:1.0, solarPeak:0.35, windNight:0.10, windDay:0.08, windPeakH:5},
+ zones:{panhandle:{w:'Givre, turbines à l\'arrêt', t:'−14 °C'}, west:{w:'Freeze-off puits', t:'−12 °C'}, north:{w:'Givre', t:'−11 °C'}, houston:{w:'Gel', t:'−6 °C'}, south:{w:'Froid', t:'−3 °C'}},
+ brief:`Le froid fait deux choses en même temps : il pousse la charge à un pic matinal et il gèle les têtes de puits, ce qui fait exploser le prix du gaz. Attention au piège : un prix de l'électricité très élevé ne signifie pas une CCGT rentable — ce qui compte est l'écart entre le prix élec et le coût du combustible, le spark spread.`,
+ realizations:[
+  {id:'freeze', p:0.5, name:`Freeze-off massif : molécules introuvables`, mod:{gas:22, gasSpot:45, loadScale:1.04}, text:`Les têtes de puits ont gelé. Le gaz qui fixe le prix de l'électricité cote 22 $/MMBtu, mais toi, pour être livré aujourd'hui, tu payes 45 $/MMBtu au comptant. Ton coût variable dépasse le prix de l'électricité : chaque MWh produit détruit de la marge.`},
+  {id:'held', p:0.5, name:`Le système gazier tient`, mod:{gas:11, gasSpot:12}, text:`L'approvisionnement a tenu : le gaz est monté à 11 $/MMBtu sans plus, et la CCGT a conservé un spark spread confortable.`}
+ ],
+ options:[
+  {label:`Laisser la CCGT tourner au marché, sans couverture gaz`, tag:`Exposé`, effect:{mustRunHours:12},
+   why:`Te laisse exposé au risque que le combustible renchérisse plus vite que l'électricité. En février 2021, c'est exactement ce qui a ruiné des producteurs : ils vendaient de l'électricité chère avec du gaz encore plus cher.`},
+  {label:`Acheter le gaz à terme la veille (couverture à 9,50 $/MMBtu)`, tag:`Gaz couvert`, effect:{gasHedge:9.5, mustRunHours:12},
+   why:`Fige le coût du combustible avant le freeze-off. Le spark spread devient prévisible et reste positif même si le gaz explose — c'est la couverture la plus élémentaire d'un producteur thermique, et elle vaut sa prime les jours de risque physique.`},
+  {label:`Arrêter la CCGT et racheter l'énergie sur le marché`, tag:`Arrêt`, effect:{ccgtOff:true},
+   why:`Évite le risque combustible mais renonce à la marge d'une unité qui, couverte, aurait été très rentable. Arrêter une unité pilotable pendant une pointe hivernale est rarement le bon arbitrage.`}
+ ],
+ lesson:`Spark spread = prix élec − (prix gaz × heat rate) − coûts variables. Un pic de prix élec accompagné d'un pic de gaz plus fort encore détruit la marge : c'est le risque de base combustible, et il se couvre sur le marché gazier, pas sur l'électricité.`
+},
+{
+ id:'spr-wind', season:'Printemps', title:`Vent record, prix négatifs`,
+ ctx:[{k:'Charge',v:'faible, 46 GW'},{k:'Gaz',v:'2,80 $/MMBtu'},{k:'Vent',v:'record, 24 GW'},{k:'Solaire',v:'bon'}],
+ gas:2.8,
+ profile:{base:38, peak:52, peakH:19, morning:0.4, solarPeak:0.85, windNight:0.82, windDay:0.72, windPeakH:2},
+ zones:{panhandle:{w:'Vent 16 m/s', t:'18 °C'}, west:{w:'Vent 15 m/s', t:'21 °C'}, north:{w:'Vent 12 m/s', t:'19 °C'}, houston:{w:'Doux', t:'23 °C'}, south:{w:'Vent 11 m/s', t:'24 °C'}},
+ brief:`Charge faible et vent record : le résiduel s'effondre, et à certaines heures la production renouvelable dépasse presque la demande. Le prix devient négatif — le marché paie pour absorber l'énergie. Ton parc éolien produit à plein régime au pire moment possible pour lui : c'est la cannibalisation, mesurable dans son prix de capture.`,
+ realizations:[
+  {id:'deep', p:0.5, name:`Prix profondément négatifs la nuit`, mod:{windScale:1.1}, text:`Le vent a soufflé encore plus fort que prévu : les prix nocturnes sont restés négatifs plusieurs heures d'affilée.`},
+  {id:'mild', p:0.5, name:`Négatifs brefs en milieu de nuit`, mod:{windScale:0.92}, text:`Le vent est légèrement retombé : les prix négatifs se sont limités à quelques heures.`}
+ ],
+ options:[
+  {label:`Continuer à produire : le crédit d'impôt (PTC, ~15 $/MWh) reste acquis`, tag:`PTC`, effect:{ptc:15},
+   why:`C'est la raison pour laquelle des parcs éoliens produisent à prix négatif : tant que prix + PTC reste positif, chaque MWh rapporte encore. Le plancher économique d'un parc sous PTC n'est pas 0 $/MWh mais environ −15 $/MWh.`},
+  {label:`Écrêter dès que le prix passe sous le plancher du PTC`, tag:`Écrêtage`, effect:{ptc:15, curtailWind:true},
+   why:`La règle correcte : produire tant que prix + PTC > 0, s'arrêter en dessous. On ne raisonne pas sur le signe du prix seul, mais sur le revenu total du MWh, subventions comprises.`},
+  {label:`Écrêter dès que le prix devient négatif`, tag:`Prudent`, effect:{curtailWind:true},
+   why:`Réflexe intuitif mais sous-optimal quand un PTC s'applique : entre 0 et −15 $/MWh, arrêter la machine fait perdre un crédit d'impôt supérieur au coût du prix négatif.`}
+ ],
+ lesson:`Un parc sous PTC produit tant que prix + subvention > 0 : c'est ce qui explique la persistance des prix négatifs au Texas. Par ailleurs, le prix de capture d'un actif éolien est structurellement inférieur au prix moyen du marché : il produit quand tout le monde produit. Un portefeuille bien construit place en face des actifs qui gagnent précisément à ces heures-là — batterie, ou flexibilité.`
+},
+{
+ id:'sum-cloud', season:'Été', title:`Prévision solaire ratée`,
+ ctx:[{k:'Charge',v:'pointe 76 GW'},{k:'Gaz',v:'3,40 $/MMBtu'},{k:'Solaire',v:'−40% vs prévision'},{k:'Position',v:'ferme solaire vendue en DA'}],
+ gas:3.4,
+ profile:{base:58, peak:88, peakH:17, morning:0.4, solarPeak:0.5, windNight:0.2, windDay:0.12, windPeakH:4},
+ zones:{panhandle:{w:'Couvert', t:'32 °C'}, west:{w:'Vent 6 m/s', t:'35 °C'}, north:{w:'Orages', t:'31 °C'}, houston:{w:'Couvert', t:'34 °C'}, south:{w:'Nuageux, solaire amputé', t:'35 °C'}},
+ brief:`Un système orageux a réduit le solaire de 40% par rapport à la prévision Day-Ahead. Ta ferme solaire a été vendue en Day-Ahead sur un volume qu'elle ne produira pas : le manque devra être racheté au prix Real-Time, qui monte précisément parce que le solaire manque à l'échelle du système. C'est un risque de volume ET de prix, corrélés dans le mauvais sens.`,
+ realizations:[
+  {id:'tight', p:0.7, name:`Le Real-Time se tend fortement`, mod:{loadScale:1.02, solarScale:0.62}, text:`Le déficit solaire du système a poussé le résiduel et les prix Real-Time bien au-dessus du Day-Ahead.`},
+  {id:'wind', p:0.3, name:`Le vent compense partiellement`, mod:{windScale:1.6}, text:`Une hausse du vent a partiellement comblé le déficit solaire : l'écart DA-RT est resté modéré.`}
+ ],
+ options:[
+  {label:`Racheter immédiatement le déficit solaire en Day-Ahead intraday`, tag:`Solder`, effect:{solarBuyback:'early'},
+   why:`Solde le risque de volume pendant que l'écart DA-RT est encore modéré. Quand ton déficit est corrélé au déficit du système entier, attendre revient à acheter au pire moment.`},
+  {label:`Attendre le Real-Time et solder au fil de l'eau`, tag:`Attendre`, effect:{solarBuyback:'late'},
+   why:`Parie que le système absorbera le déficit. Or ton manque de volume est précisément corrélé à la tension du marché : c'est le pire moment pour être acheteur.`},
+  {label:`Compenser en poussant la CCGT et la batterie sur la pointe`, tag:`Compenser`, effect:{solarBuyback:'late', ccgtPush:true},
+   why:`Utilise le portefeuille comme couverture naturelle : les actifs pilotables gagnent exactement quand le solaire manque. C'est imparfait — le volume reste à racheter — mais la corrélation joue en ta faveur.`}
+ ],
+ lesson:`Un actif intermittent vendu en Day-Ahead porte un risque de volume corrélé au prix : le manque coûte cher quand le système en manque aussi. Les actifs pilotables du même portefeuille sont la couverture naturelle de cette corrélation.`
+},
+{
+ id:'ppa', season:'Automne', title:`Signer un PPA sur le parc éolien ?`, noVerdict:true,
+ ctx:[{k:'Offre',v:'PPA financier 10 ans'},{k:'Strike',v:'32 $/MWh, as produced'},{k:'Prix moyen',v:'~34 $/MWh'},{k:'Capture éolien',v:'~26 $/MWh'}],
+ gas:3.1,
+ profile:{base:44, peak:62, peakH:19, morning:0.45, solarPeak:0.7, windNight:0.55, windDay:0.4, windPeakH:3},
+ zones:{panhandle:{w:'Vent 10 m/s', t:'22 °C'}, west:{w:'Vent 11 m/s', t:'24 °C'}, north:{w:'Doux', t:'23 °C'}, houston:{w:'Doux', t:'26 °C'}, south:{w:'Vent 8 m/s', t:'27 °C'}},
+ brief:`Un corporate propose un PPA financier « as produced » à 32 $/MWh sur ton parc éolien. Attention au piège classique : le prix moyen du marché est d'environ 34 $/MWh, mais ton parc ne capture que ~26 $/MWh, parce qu'il produit quand les prix sont bas. Comparer le strike au prix moyen n'a aucun sens — il faut le comparer au prix de capture.`,
+ realizations:[
+  {id:'windy', p:0.5, name:`Année venteuse, prix comprimés`, mod:{windScale:1.25}, text:`Beaucoup de vent : le volume est au rendez-vous mais les prix de capture sont encore plus bas que la moyenne historique.`},
+  {id:'calm', p:0.5, name:`Année peu venteuse, prix soutenus`, mod:{windScale:0.75}, text:`Moins de vent : les volumes sont plus faibles mais les prix capturés remontent.`}
+ ],
+ options:[
+  {label:`Signer le PPA sur 100% du volume`, tag:`Couvert`, effect:{sign:'ppaWind', strike:32, ratio:1},
+   why:`Le strike de 32 $/MWh est supérieur au prix de capture merchant (~26 $/MWh) : le PPA améliore le revenu moyen attendu et le rend prévisible, ce qui débloque le financement. En contrepartie, tu abandonnes les années de prix hauts.`},
+  {label:`Signer sur 50% du volume`, tag:`Hybride`, effect:{sign:'ppaWind', strike:32, ratio:0.5},
+   why:`Moitié sécurisée, moitié merchant : le compromis habituel quand les prêteurs veulent de la visibilité mais que le sponsor croit à une remontée des prix.`},
+  {label:`Rester merchant`, tag:`Merchant`, effect:{},
+   why:`Conserve tout l'upside, mais laisse le revenu du parc dépendre d'un prix de capture structurellement déprimé par la cannibalisation — le risque que le PPA était précisément censé traiter.`}
+ ],
+ lesson:`Un PPA « as produced » se juge contre le PRIX DE CAPTURE de l'actif, jamais contre le prix moyen du marché. L'écart entre les deux mesure exactement la cannibalisation subie par la technologie.`
+},
+{
+ id:'toll', season:'Automne', title:`Tolling sur la CCGT ?`, noVerdict:true,
+ ctx:[{k:'Offre',v:'Tolling 3 ans'},{k:'Fee',v:'62 k$/jour, gaz fourni'},{k:'Spark moyen',v:'~55 k$/jour'},{k:'Volatilité',v:'élevée (hiver)'}],
+ gas:3.3,
+ profile:{base:48, peak:70, peakH:18, morning:0.4, solarPeak:0.75, windNight:0.35, windDay:0.25, windPeakH:3},
+ zones:{panhandle:{w:'Vent 8 m/s', t:'24 °C'}, west:{w:'Vent 9 m/s', t:'26 °C'}, north:{w:'Doux', t:'25 °C'}, houston:{w:'Doux', t:'28 °C'}, south:{w:'Vent 7 m/s', t:'29 °C'}},
+ brief:`Un trader propose un tolling sur ta CCGT : il te paie 62 k$/jour, fournit le gaz et prend toutes les décisions de dispatch. Tu abandonnes le spark spread — et, avec lui, le risque de base combustible qui t'a coûté cher en février.`,
+ realizations:[
+  {id:'volatile', p:0.5, name:`Hiver volatil à venir`, mod:{gas:5.5}, text:`Les forwards gaz montent : la volatilité du spark spread s'annonce forte, dans les deux sens.`},
+  {id:'calm', p:0.5, name:`Marché calme`, mod:{}, text:`Le marché reste calme : le spark spread évolue près de sa moyenne.`}
+ ],
+ options:[
+  {label:`Signer le tolling (62 k$/jour, gaz fourni)`, tag:`Tolling`, effect:{sign:'tollCCGT', fee:62},
+   why:`Transfère au toller le spark spread ET le risque combustible. Le fee est supérieur au spark spread moyen : tu es payé pour céder la volatilité, ce qui est rationnel si ton book porte déjà beaucoup de risque prix ailleurs.`},
+  {label:`Rester merchant sur la CCGT`, tag:`Merchant`, effect:{},
+   why:`Conserve l'optionalité de la centrale, qui vaut cher lors des pointes hivernales — mais réexpose le portefeuille au risque gaz que tu viens d'apprendre à connaître.`},
+  {label:`Tolling saisonnier : céder l'été, garder l'hiver`, tag:`Saisonnier`, effect:{sign:'tollCCGT', fee:62, ratio:0.5},
+   why:`Vend la période où l'optionalité vaut le moins et conserve celle où la centrale peut faire l'année. Structuration plus fine, mais la contrepartie price cette asymétrie : le fee est plus bas au prorata.`}
+ ],
+ lesson:`Un tolling est l'équivalent thermique d'un tolling batterie : le propriétaire échange une distribution (le spark spread, combustible compris) contre un flux fixe. Il se juge en comparant le fee à l'espérance du spark spread — et à la volatilité dont on veut se débarrasser.`
+},
+{
+ id:'provision', season:'Clôture', title:`Clôture mensuelle : quelles provisions ?`, payoffRound:true,
+ ctx:[{k:'Book',v:'PPA et swaps ouverts'},{k:'MtM',v:'−1,8 M$ latent'},{k:'Contrepartie',v:'notation dégradée'},{k:'Litige',v:'pénalité ERCOT contestée'}],
+ gas:3.2,
+ profile:{base:46, peak:64, peakH:18, morning:0.4, solarPeak:0.75, windNight:0.4, windDay:0.3, windPeakH:3},
+ zones:{panhandle:{w:'—', t:'—'}, west:{w:'—', t:'—'}, north:{w:'—', t:'—'}, houston:{w:'—', t:'—'}, south:{w:'—', t:'—'}},
+ brief:`Fin de mois, le middle office arrête les comptes. Trois sujets sur la table : la valorisation de marché (mark-to-market) des couvertures ouvertes, la dégradation de notation d'une contrepartie de swap, et une pénalité ERCOT que tu contestes. La question n'est pas « combien on a gagné » mais « qu'est-ce qui doit figurer dans les comptes, et à quel titre ».`,
+ realizations:[
+  {id:'audit', p:0.6, name:`Revue des commissaires aux comptes`, mod:{}, text:`Les auditeurs ont examiné le traitement retenu lors de la revue trimestrielle.`},
+  {id:'quiet', p:0.4, name:`Clôture sans revue approfondie`, mod:{}, text:`La clôture est passée sans revue détaillée ce mois-ci.`}
+ ],
+ options:[
+  {label:`Provisionner le MtM négatif, provisionner le risque de contrepartie, mentionner le litige en annexe`, tag:`Complet`,
+   payoffs:{audit:40, quiet:20},
+   why:`Traitement correct : le MtM latent des dérivés se reflète en comptes, le risque de crédit dégradé se provisionne (CVA), et un litige dont l'issue est incertaine mais non probable se mentionne en engagement hors bilan plutôt que de se provisionner intégralement.`},
+  {label:`Ne rien provisionner : ce sont des pertes latentes, pas réalisées`, tag:`Minimal`,
+   payoffs:{audit:-90, quiet:-10},
+   why:`Confondre « latent » et « inexistant » est l'erreur classique. Une position dérivée ouverte se valorise au marché : son MtM négatif est une charge à constater, pas un événement futur hypothétique.`},
+  {label:`Tout provisionner au maximum, litige inclus`, tag:`Excessif`,
+   payoffs:{audit:-25, quiet:-15},
+   why:`Sur-provisionner n'est pas prudent, c'est inexact : constituer une provision pour un litige dont la sortie de ressources n'est pas probable fausse le résultat autant qu'une sous-provision, et crée des reprises artificielles plus tard.`}
+ ],
+ lesson:`Le middle office ne choisit pas le résultat : il applique un traitement. MtM des dérivés en résultat, risque de contrepartie en provision (CVA), litige possible mais non probable en engagement hors bilan.`
+},
+{
+ id:'policy', season:'Politique', title:`Le PUCT bouge, Washington aussi`, payoffRound:true,
+ ctx:[{k:'PUCT',v:'revue du plafond RT'},{k:'Législature',v:'mandat de winterisation'},{k:'Fédéral',v:'crédits d\'impôt renouvelables'},{k:'LNG',v:'exports en hausse → gaz'}],
+ gas:4.2,
+ profile:{base:50, peak:72, peakH:18, morning:0.4, solarPeak:0.8, windNight:0.35, windDay:0.25, windPeakH:3},
+ zones:{panhandle:{w:'Vent 8 m/s', t:'27 °C'}, west:{w:'Vent 9 m/s', t:'30 °C'}, north:{w:'Doux', t:'29 °C'}, houston:{w:'Chaud', t:'32 °C'}, south:{w:'Vent 7 m/s', t:'33 °C'}},
+ brief:`Trois dossiers politiques arrivent en même temps, et chacun déplace une partie de ta valeur : une revue du plafond de prix en temps réel, un mandat de winterisation qui impose du capex à ta CCGT, et la montée des exports de GNL qui tire le prix du gaz américain vers le haut — donc le coût variable de ton thermique et, par le merit order, le prix de l'électricité.`,
+ realizations:[
+  {id:'strict', p:0.5, name:`Réglementation resserrée`, mod:{gas:5}, text:`Le mandat de winterisation est adopté avec un calendrier court, et le gaz reste tiré par les exports.`},
+  {id:'soft', p:0.5, name:`Calendrier assoupli`, mod:{}, text:`Le mandat est adopté avec un calendrier étalé et le plafond reste inchangé.`}
+ ],
+ options:[
+  {label:`Provisionner le capex de winterisation et couvrir le gaz sur l'hiver`, tag:`Anticipe`,
+   payoffs:{strict:55, soft:25},
+   why:`Traite les deux canaux du risque politique : le canal comptable (une obligation légale probable dont le montant est estimable se provisionne) et le canal marché (des exports de GNL structurellement haussiers sur le gaz se couvrent sur la courbe forward).`},
+  {label:`Attendre le vote final avant tout engagement`, tag:`Attentiste`,
+   payoffs:{strict:-60, soft:30},
+   why:`Défendable tant que rien n'est probable — mais quand un texte est en passe d'être adopté et que le gaz monte déjà, attendre revient à subir les deux risques au moment où la couverture coûte le plus cher.`},
+  {label:`Vendre la CCGT pour sortir du risque réglementaire`, tag:`Radical`,
+   payoffs:{strict:-20, soft:-40},
+   why:`Sortir un actif pilotable d'un portefeuille à forte composante renouvelable supprime précisément la couverture naturelle qui te protège les jours sans vent. Le risque réglementaire se gère, il ne justifie pas de déséquilibrer le portefeuille.`}
+ ],
+ lesson:`Le politique agit sur trois canaux : les règles de marché (plafonds, produits), les obligations pesant sur les actifs (winterisation, permis) et les fondamentaux (exports de GNL → prix du gaz → prix de l'électricité par le merit order).`
+}
+];
+
+/* =========================================================
+   MOTEUR SYSTÈME — construit la journée, puis le P&L par actif
+   ========================================================= */
+var SYS_LEN = 8;
+var SYS_RISK_LIMIT = -600;
+var SYS_BEST_KEY = 'battery-desk-drill-sysbest-v1';
+var sys = null;
+
+function getSysBest(){
+  try{ return parseInt(localStorage.getItem(SYS_BEST_KEY) || '0', 10) || 0; }catch(e){ return 0; }
+}
+function saveSysBest(){
+  try{ if(sys && sys.pnl > getSysBest()) localStorage.setItem(SYS_BEST_KEY, String(sys.pnl)); }catch(e){}
+}
+
+/* Construit les 24 heures du système pour un état du monde donné. */
+function buildDay(sc, real){
+  var m = (real && real.mod) || {};
+  var pr = sc.profile;
+  var gas = m.gas !== undefined ? m.gas : sc.gas;
+  var gasSpot = m.gasSpot !== undefined ? m.gasSpot : gas;  /* ton coût livré */
+  var windScale = m.windScale || 1, solarScale = m.solarScale || 1, loadScale = m.loadScale || 1;
+  var d = {gas:gas, gasSpot:gasSpot, load:[], windCF:[], solarCF:[], windGW:[], solarGW:[], residual:[], price:[]};
+  /* Parc ERCOT (GW installés, ordres de grandeur 2026) */
+  var FLEET_WIND = 42, FLEET_SOLAR = 32;
+  for(var h=0; h<24; h++){
+    var load = loadShape(h, pr.base, pr.peak, pr.peakH, pr.morning) * loadScale;
+    var wcf = Math.min(0.98, windShape(h, pr.windNight, pr.windDay, pr.windPeakH) * windScale);
+    var scf = Math.min(1, solarShape(h, pr.solarPeak) * solarScale);
+    var wgw = FLEET_WIND * wcf, sgw = FLEET_SOLAR * scf;
+    var res = load - wgw - sgw;
+    d.load.push(Math.round(load*10)/10);
+    d.windCF.push(wcf); d.solarCF.push(scf);
+    d.windGW.push(Math.round(wgw*10)/10); d.solarGW.push(Math.round(sgw*10)/10);
+    d.residual.push(Math.round(Math.max(0,res)*10)/10);
+    d.price.push(priceFromResidual(res, gas));
+  }
+  return d;
+}
+
+/* Optimiseur simple de la batterie : n cycles sur les meilleures fenêtres. */
+function bessPnl(price, cycles, optional){
+  var idx = price.map(function(p,h){ return {p:p,h:h}; });
+  var sorted = idx.slice().sort(function(a,b){ return a.p - b.p; });
+  var total = 0, windows = {charge:[], discharge:[]};
+  for(var c=0; c<cycles; c++){
+    var low = sorted.slice(c*4, c*4+4), high = sorted.slice(sorted.length - (c+1)*4, sorted.length - c*4);
+    if(low.length < 4 || high.length < 4) break;
+    var rev = 0, cost = 0;
+    high.forEach(function(x){ rev += x.p * 0.1; });
+    low.forEach(function(x){ cost += x.p * 0.115; });
+    var margin = rev - cost - (c > 0 ? CYCLE_COST : 0);
+    if(c > 0 && optional && margin <= 0) break;   /* règle du cycle marginal */
+    total += margin;
+    if(c === 0){
+      windows.charge = low.map(function(x){return x.h;}).sort(function(a,b){return a-b;});
+      windows.discharge = high.map(function(x){return x.h;}).sort(function(a,b){return a-b;});
+    }
+  }
+  return {pnl: total, windows: windows};
+}
+
+/* P&L par actif, en k$ pour la journée. */
+function portfolioPnl(sc, day, effect, book, dayDA){
+  effect = effect || {}; book = book || {};
+  var price = day.price, h;
+  var out = {assets:[], total:0, detail:{}};
+
+  /* --- CCGT : spark spread horaire --- */
+  var ccgt = PORTFOLIO[0];
+  var gasCost = (effect.gasHedge || book.gasHedge || day.gasSpot || day.gas) * ccgt.hr + ccgt.vom;
+  var ccgtPnl = 0, runHours = 0, sparkSum = 0;
+  if(effect.mustRunHours){
+    /* Engagement Day-Ahead : l'unité tourne quoi qu'il arrive, spark négatif compris. */
+    var ranked = price.map(function(p,i){ return {p:p,h:i}; }).sort(function(a,b){ return b.p - a.p; })
+                      .slice(0, effect.mustRunHours);
+    ranked.forEach(function(x){
+      var sp = x.p - gasCost;
+      ccgtPnl += sp * ccgt.mw / 1000; runHours++; sparkSum += sp;
+    });
+  } else {
+    for(h=0; h<24; h++){
+      var spark = price[h] - gasCost;
+      if(spark > 0){ ccgtPnl += spark * ccgt.mw / 1000; runHours++; sparkSum += spark; }
+    }
+  }
+  if(effect.ccgtOff) ccgtPnl = 0;
+  if(effect.ccgtDA && dayDA){
+    /* Réglé sur la courbe Day-Ahead : pas de prime de rareté temps réel. */
+    ccgtPnl = 0; runHours = 0; sparkSum = 0;
+    for(h=0; h<24; h++){
+      var sparkDA = dayDA.price[h] - gasCost;
+      if(sparkDA > 0){ ccgtPnl += sparkDA * ccgt.mw / 1000; runHours++; sparkSum += sparkDA; }
+    }
+  }
+  if(effect.ccgtPush) ccgtPnl *= 1.08;
+  var tollRatio = (effect.sign === 'tollCCGT') ? (effect.ratio || 1) : (book.tollCCGT ? book.tollRatio : 0);
+  var tollFee = (effect.sign === 'tollCCGT') ? effect.fee : book.tollFee;
+  var ccgtMerchant = ccgtPnl;
+  if(tollRatio) ccgtPnl = ccgtPnl*(1-tollRatio) + tollFee*tollRatio;
+  out.detail.ccgt = {merchant:ccgtMerchant, runHours:runHours, gasCost:gasCost,
+                     avgSpark: runHours ? sparkSum/runHours : 0};
+
+  /* --- Éolien : volume × prix, prix de capture --- */
+  var wind = PORTFOLIO[1], wVol = 0, wRev = 0;
+  var ptc = effect.ptc || 0;   /* crédit d'impôt production, $/MWh */
+  for(h=0; h<24; h++){
+    var mwh = wind.mw * day.windCF[h];
+    if(effect.curtailWind && (price[h] + ptc) < 0) continue;  /* on s'arrête sous le plancher PTC */
+    wVol += mwh; wRev += mwh * (price[h] + ptc) / 1000;
+  }
+  var capture = wVol ? (wRev*1000/wVol) : 0;
+  var windMerchant = wRev;
+  var ppaRatio = (effect.sign === 'ppaWind') ? (effect.ratio || 1) : (book.ppaWind ? book.ppaRatio : 0);
+  var strike = (effect.sign === 'ppaWind') ? effect.strike : book.ppaStrike;
+  if(ppaRatio) wRev = wRev*(1-ppaRatio) + (strike * wVol / 1000) * ppaRatio;
+  out.detail.wind = {merchant:windMerchant, volume:wVol, capture:capture};
+
+  /* --- Solaire --- */
+  var solar = PORTFOLIO[2], sVol = 0, sRev = 0;
+  for(h=0; h<24; h++){
+    var smwh = solar.mw * day.solarCF[h];
+    sVol += smwh; sRev += smwh * price[h] / 1000;
+  }
+  var sCapture = sVol ? (sRev*1000/sVol) : 0;
+  /* Vendu en Day-Ahead sur la prévision : le volume manquant se rachète au marché. */
+  if(effect.solarBuyback){
+    var deficit = sVol * 0.4;                       /* 40% du volume prévu manque */
+    var midday = (price[12] + price[13] + price[14])/3;
+    var peakP = Math.max.apply(null, price.slice(14, 21));
+    var buyPrice = (effect.solarBuyback === 'early') ? midday * 1.15 : peakP;
+    sRev -= deficit * buyPrice / 1000;
+    out.detail.solarDeficit = {mwh:deficit, price:buyPrice};
+  }
+  out.detail.solar = {volume:sVol, capture:sCapture};
+
+  /* --- Batterie --- */
+  var cycles = effect.bessCycles || (effect.bessAggressive ? 2 : 1);
+  var b = bessPnl(price, cycles, !effect.bessCycles);
+  var bPnl = b.pnl;
+  if(book.bessSwap) bPnl = HEDGE_FIXED;
+  out.detail.bess = {windows:b.windows, cycles:cycles};
+
+  out.assets = [
+    {id:'ccgt', name:'CCGT', pnl:Math.round(ccgtPnl)},
+    {id:'wind', name:'Éolien', pnl:Math.round(wRev)},
+    {id:'solar', name:'Solaire', pnl:Math.round(sRev)},
+    {id:'bess', name:'Batterie', pnl:Math.round(bPnl)}
+  ];
+  if(effect.payoff) out.assets.push({id:'other', name:'Décision', pnl:effect.payoff});
+  out.total = out.assets.reduce(function(s,a){ return s + a.pnl; }, 0);
+  return out;
+}
+
+function sysOptionPnl(sc, opt, real, book){
+  var day = buildDay(sc, real);
+  if(opt.payoffs !== undefined){
+    /* Journées de décision pure (provisions, politique) : la valeur est
+       l'effet de la décision, pas le P&L d'exploitation du jour. */
+    return opt.payoffs[real.id];
+  }
+  return portfolioPnl(sc, day, opt.effect || {}, book, buildDay(sc, {mod:{}})).total;
+}
+function sysOptionEV(sc, opt, book){
+  var ev = 0;
+  sc.realizations.forEach(function(r){ ev += r.p * sysOptionPnl(sc, opt, r, book); });
+  return Math.round(ev);
+}
+function sysPickReal(sc){
+  var r = Math.random(), acc = 0;
+  for(var i=0;i<sc.realizations.length;i++){
+    acc += sc.realizations[i].p;
+    if(r <= acc) return sc.realizations[i];
+  }
+  return sc.realizations[sc.realizations.length-1];
+}
+
+function sysStart(){
+  sys = {order: shuffle(SYS_SCENARIOS.slice()), day:0, pnl:0, history:[], book:{},
+         phase:'brief', chosen:-1, result:null, goodCalls:0, rounds:0, busted:false,
+         ledger:{ppaWind:0, tollCCGT:0, gasHedge:0}};
+  /* On garde une progression pédagogique : saisons dans l'ordre, décisions ensuite. */
+  sys.order = SYS_SCENARIOS.slice();
+  app.view = 'system';
+  render();
+}
+function sysChoose(i){
+  if(!sys || sys.phase !== 'brief') return;
+  var sc = sys.order[sys.day];
+  var real = sysPickReal(sc);
+  var book = sys.book;
+  var table = sc.options.map(function(o,k){
+    return {i:k, label:o.label, tag:o.tag, why:o.why,
+            ev: sysOptionEV(sc, o, book), real: sysOptionPnl(sc, o, real, book)};
+  });
+  var bestEv = table.slice().sort(function(a,b){ return b.ev - a.ev; })[0];
+  var chosen = sc.options[i];
+  var day = buildDay(sc, real);
+  var dayDA = buildDay(sc, {mod:{}});
+  var breakdown = chosen.payoffs !== undefined ? null : portfolioPnl(sc, day, chosen.effect || {}, book, dayDA);
+  var unhedged = chosen.payoffs !== undefined ? null : portfolioPnl(sc, day, {}, {}, dayDA);
+  var applied = table[i].real;
+
+  /* Effets persistants sur le book de couvertures */
+  var eff = chosen.effect || {};
+  if(eff.sign === 'ppaWind'){ book.ppaWind = true; book.ppaStrike = eff.strike; book.ppaRatio = eff.ratio || 1; }
+  if(eff.sign === 'tollCCGT'){ book.tollCCGT = true; book.tollFee = eff.fee; book.tollRatio = eff.ratio || 1; }
+  if(eff.gasHedge){ book.gasHedgeUsed = true; }
+  /* Ce que les couvertures déjà en place ont coûté ou rapporté aujourd'hui */
+  if(breakdown && unhedged){
+    if(book.ppaWind) sys.ledger.ppaWind += (breakdown.assets[1].pnl - unhedged.assets[1].pnl);
+    if(book.tollCCGT) sys.ledger.tollCCGT += (breakdown.assets[0].pnl - unhedged.assets[0].pnl);
+  }
+
+  sys.pnl += applied;
+  sys.history.push(applied);
+  sys.chosen = i;
+  var optimal = (i === bestEv.i);
+  if(!sc.noVerdict){ sys.rounds++; if(optimal) sys.goodCalls++; }
+  sys.result = {real:real, day:day, table:table, bestEv:bestEv, applied:applied,
+                optimal:optimal, breakdown:breakdown, unhedged:unhedged, opt:chosen};
+  sys.phase = 'result';
+  if(sys.pnl <= SYS_RISK_LIMIT) sys.busted = true;
+  render();
+}
+function sysNext(){
+  if(!sys) return;
+  if(sys.busted || sys.day >= SYS_LEN - 1){ sys.phase = 'end'; saveSysBest(); render(); return; }
+  sys.day++; sys.phase = 'brief'; sys.chosen = -1; sys.result = null;
+  render();
+}
+function sysAction(a){
+  if(a === 'start' || a === 'restart'){ sysStart(); return; }
+  if(a === 'next'){ sysNext(); return; }
+}
+
+/* =========================================================
    GAME ENGINE — PnL Maker
    Principe : aucun gain n'est tiré au sort. Le hasard porte
    UNIQUEMENT sur l'état du monde (la courbe Real-Time réalisée) ;
@@ -1537,6 +2055,7 @@ function render(){
   if(app.view === 'dashboard') c.innerHTML = viewDashboard();
   else if(app.view === 'reference') c.innerHTML = viewReference();
   else if(app.view === 'game') c.innerHTML = viewGame();
+  else if(app.view === 'system') c.innerHTML = viewSystem();
   else if(app.view === 'quiz') c.innerHTML = viewQuiz();
   else if(app.view === 'summary') c.innerHTML = viewSummary();
 }
@@ -1565,7 +2084,8 @@ function renderRail(){
   var html = '';
   html += '<div class="rail-section-label">Vue</div>';
   html += railBtn({nav:'dashboard', ticker:'HOME', label:'Dashboard', active: app.view==='dashboard'});
-  html += railBtn({nav:'game', ticker:'JEU', label:'PnL Maker', meta:'Simulation de trading', cls:'game', active: app.view==='game'});
+  html += railBtn({nav:'game', ticker:'JEU', label:'PnL Maker', meta:'Batterie · décisions de marché', cls:'game', active: app.view==='game'});
+  html += railBtn({nav:'system', ticker:'SYS', label:'Système Texas', meta:'Portefeuille 4 actifs · 1 an', cls:'game', active: app.view==='system'});
   html += railBtn({nav:'reference', ticker:'REF', label:'Fiches contrats', active: app.view==='reference'});
   html += '<div class="rail-section-label">Thèmes</div>';
   THEMES.filter(function(t){return t.key!=='cases';}).forEach(function(t){
@@ -1607,6 +2127,7 @@ function viewDashboard(){
 
   html += '<div class="actions-row">';
   html += '<button class="btn btn-primary" data-nav="game">Jouer — PnL Maker</button>';
+  html += '<button class="btn btn-primary" data-nav="system">Jouer — Système Texas</button>';
   html += '<button class="btn" data-nav="review">Réviser mes erreurs (' + reviewQueue().length + ')</button>';
   html += '<button class="btn" data-nav="exam">Examen blanc — 20 questions</button>';
   html += '<button class="btn btn-ghost" data-nav="reference">Ouvrir les fiches contrats</button>';
@@ -1968,6 +2489,267 @@ function viewGame(){
   html += '</div>';
   return html;
 }
+/* ---------- Carte du Texas : météo par zone + niveau de prix ---------- */
+/* Silhouette du Texas : panhandle, frontière nord, Louisiane, côte du Golfe,
+   pointe sud de Brownsville, puis le Rio Grande en diagonale jusqu'à El Paso. */
+var TEXAS_PATH = 'M26,9 L44,9 L44,24 L56,24 L60,27 L67,26 L73,29 L79,29 ' +
+  'L81,41 L77,46 L70,51 L64,58 L59,65 L55,73 L57,82 ' +
+  'L50,75 L43,68 L36,60 L30,52 L23,46 L17,39 L12,34 ' +
+  'L12,25 L26,25 Z';
+
+function priceTone(p){
+  /* Rampe séquentielle à une seule teinte : clair = prix bas, foncé = prix élevé. */
+  if(p < 0) return 'neg';
+  if(p < 25) return 's1';
+  if(p < 45) return 's2';
+  if(p < 90) return 's3';
+  if(p < 250) return 's4';
+  return 's5';
+}
+function texasMap(sc, day){
+  var avg = day ? Math.round(day.price.reduce(function(s,p){ return s+p; },0)/24) : null;
+  var peak = day ? Math.max.apply(null, day.price) : null;
+  var chips = ZONES.map(function(z){
+    var info = (sc.zones && sc.zones[z.id]) || {w:'—', t:'—'};
+    /* Le prix nodal réel varie par zone ; on module le prix système par zone. */
+    var mod = {panhandle:0.82, west:0.78, north:1.0, houston:1.12, south:0.95}[z.id] || 1;
+    var zp = day ? Math.round(avg * mod) : null;
+    var tone = zp === null ? 's2' : priceTone(zp);
+    var assets = PORTFOLIO.filter(function(a){ return a.zone === z.id; });
+    return '<g class="zone">' +
+      '<circle class="zone-dot tone-'+tone+'" cx="'+z.x+'" cy="'+z.y+'" r="3.4"/>' +
+      '<text class="zone-name" x="'+(z.x+5)+'" y="'+(z.y-1)+'">'+esc(z.name)+'</text>' +
+      '<text class="zone-meta" x="'+(z.x+5)+'" y="'+(z.y+3.6)+'">'+esc(info.w)+' · '+esc(info.t)+
+        (zp !== null ? ' · '+zp+' $' : '')+'</text>' +
+      (assets.length ? '<text class="zone-asset" x="'+(z.x+5)+'" y="'+(z.y+8)+'">◆ '+
+        assets.map(function(a){ return esc(a.short); }).join(' + ')+'</text>' : '') +
+    '</g>';
+  }).join('');
+
+  return '<figure class="chart map"><figcaption class="chart-title">Texas — météo par zone et niveau de prix' +
+      (avg !== null ? ' (moyenne système '+avg+' $/MWh, pointe '+peak+' $)' : '') + '</figcaption>' +
+    '<svg class="chart-svg map-svg" viewBox="0 0 116 100" role="img" aria-label="Carte du Texas par zone">' +
+      '<path class="tx-outline" d="'+TEXAS_PATH+'"/>' + chips +
+    '</svg>' +
+    '<div class="viz-legend">' +
+      '<span class="lg"><i class="sw-dot tone-s1"></i>prix bas</span>' +
+      '<span class="lg"><i class="sw-dot tone-s3"></i>moyen</span>' +
+      '<span class="lg"><i class="sw-dot tone-s5"></i>rareté</span>' +
+      '<span class="lg">◆ tes actifs</span>' +
+    '</div></figure>';
+}
+
+/* ---------- Pile de production : d'où vient le prix ---------- */
+function stackChart(day){
+  var W = 720, H = 220, padL = 40, padR = 12, padT = 16, padB = 26;
+  var iw = W-padL-padR, ih = H-padT-padB;
+  var maxY = Math.max.apply(null, day.load.concat([1])) * 1.12;
+  var x = function(h){ return padL + (h/23)*iw; };
+  var y = function(v){ return padT + ih - (v/maxY)*ih; };
+  var series = [
+    {key:'windGW', cls:'f-wind', label:'Éolien'},
+    {key:'solarGW', cls:'f-solar', label:'Solaire'},
+    {key:'residual', cls:'f-gas', label:'Gaz & pilotable (résiduel)'}
+  ];
+  var base = new Array(24).fill(0), paths = '';
+  series.forEach(function(s){
+    var top = day[s.key].map(function(v,h){ return base[h] + v; });
+    var d = 'M ' + x(0) + ' ' + y(base[0]);
+    for(var h=0; h<24; h++) d += ' L ' + x(h).toFixed(1) + ' ' + y(top[h]).toFixed(1);
+    for(var h2=23; h2>=0; h2--) d += ' L ' + x(h2).toFixed(1) + ' ' + y(base[h2]).toFixed(1);
+    paths += '<path class="stack '+s.cls+'" d="'+d+' Z"/>';
+    base = top;
+  });
+  var loadPath = day.load.map(function(v,h){ return (h?'L':'M')+x(h).toFixed(1)+' '+y(v).toFixed(1); }).join(' ');
+  var grid = '';
+  for(var g=0; g<=3; g++){
+    var gv = maxY*g/3;
+    grid += '<line class="viz-grid" x1="'+padL+'" y1="'+y(gv).toFixed(1)+'" x2="'+(padL+iw)+'" y2="'+y(gv).toFixed(1)+'"/>' +
+      '<text class="viz-axis" x="'+(padL-6)+'" y="'+(y(gv)+3.5).toFixed(1)+'" text-anchor="end">'+Math.round(gv)+'</text>';
+  }
+  var hl = [0,4,8,12,16,20,23].map(function(h){
+    return '<text class="viz-axis" x="'+x(h).toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle">'+h+'h</text>';
+  }).join('');
+  return '<figure class="chart"><figcaption class="chart-title">Pile de production — GW (l\'aire du haut est le résiduel couvert par le gaz)</figcaption>' +
+    '<svg class="chart-svg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" role="img" aria-label="Production par filière sur 24 heures">' +
+      grid + paths + '<path class="load-line" d="'+loadPath+'"/>' + hl +
+    '</svg>' +
+    '<div class="viz-legend">' +
+      '<span class="lg"><i class="sw-band f-wind"></i>Éolien</span>' +
+      '<span class="lg"><i class="sw-band f-solar"></i>Solaire</span>' +
+      '<span class="lg"><i class="sw-band f-gas"></i>Gaz &amp; pilotable</span>' +
+      '<span class="lg"><i class="sw-line load"></i>Charge totale</span>' +
+    '</div></figure>';
+}
+
+/* ---------- Prix système dérivé ---------- */
+function sysPriceChart(day, sc){
+  return priceChart({da:day.price, seriesLabels:{da:'Prix système ($/MWh)'}},
+    {title:'Prix horaire qui en résulte — $/MWh'});
+}
+
+/* ---------- P&L par actif : la compensation rendue visible ---------- */
+function assetBars(res){
+  var assets = res.assets;
+  var max = Math.max.apply(null, assets.map(function(a){ return Math.abs(a.pnl); }).concat([1]));
+  var rows = assets.map(function(a){
+    var w = Math.round(100*Math.abs(a.pnl)/max);
+    return '<div class="abar">' +
+      '<span class="an">'+esc(a.name)+'</span>' +
+      '<span class="atrack"><span class="afill '+(a.pnl>=0?'pos':'neg')+'" style="width:'+w+'%"></span></span>' +
+      '<span class="av mono '+(a.pnl>=0?'pos':'neg')+'">'+fmtK(a.pnl)+'</span>' +
+    '</div>';
+  }).join('');
+  return '<div class="asset-bars"><span class="calc-head">P&L par actif — comment le portefeuille se compense</span>'+rows+
+    '<div class="abar total"><span class="an">Total portefeuille</span><span class="atrack"></span>' +
+    '<span class="av mono '+(res.total>=0?'pos':'neg')+'">'+fmtK(res.total)+'</span></div></div>';
+}
+
+function sysHud(){
+  var rate = sys.rounds ? Math.round(100*sys.goodCalls/sys.rounds) : 0;
+  var chips = [];
+  if(sys.book.ppaWind) chips.push('PPA éolien '+sys.book.ppaStrike+' $');
+  if(sys.book.tollCCGT) chips.push('Tolling CCGT');
+  if(sys.book.gasHedgeUsed) chips.push('Gaz couvert');
+  var riskUsed = sys.pnl < 0 ? Math.min(100, Math.round(100*Math.abs(sys.pnl)/Math.abs(SYS_RISK_LIMIT))) : 0;
+  return '<div class="game-hud">' +
+    '<div class="hud-box"><span class="hud-label">P&L cumulé</span>' +
+      '<div class="hud-value '+(sys.pnl>0?'pos':(sys.pnl<0?'neg':''))+'">'+fmtK(sys.pnl)+'</div>' +
+      '<span class="hud-sub">portefeuille 4 actifs</span></div>' +
+    '<div class="hud-box"><span class="hud-label">Décisions optimales</span>' +
+      '<div class="hud-value">'+sys.goodCalls+' / '+sys.rounds+'</div>' +
+      '<span class="hud-sub">'+(sys.rounds ? rate+'% ex ante' : 'hors journées de structuration')+'</span></div>' +
+    '<div class="hud-box"><span class="hud-label">Séquence</span><div class="hud-value">'+(sys.day+1)+' / '+SYS_LEN+'</div>' +
+      '<span class="hud-sub">'+esc(sys.order[sys.day].season)+'</span></div>' +
+    '<div class="hud-box"><span class="hud-label">Book de couvertures</span>' +
+      '<div class="hud-value" style="font-size:.9rem;line-height:1.5;">'+(chips.length ? esc(chips.join(' · ')) : 'aucune')+'</div>' +
+      '<div class="risk-meter"><span style="width:'+riskUsed+'%"></span></div></div>' +
+  '</div>';
+}
+
+function viewSystem(){
+  if(!sys){
+    var best = getSysBest();
+    return '<div class="hero"><div><h1>Système Texas — un an de portefeuille ERCOT</h1>' +
+      '<p>Tu diriges un portefeuille de quatre actifs : une CCGT de 400 MW à Houston, 300 MW d\'éolien dans l\'Ouest, 200 MW de solaire au Sud et une batterie 100 MW / 400 MWh. Huit séquences couvrent les quatre saisons, deux décisions de structuration, une clôture comptable et un choc politique.</p></div></div>' +
+      '<div class="card"><h3 style="margin:0 0 10px;font-size:1rem;">Ce que ce jeu simule vraiment</h3>' +
+      '<ul style="margin:0;padding-left:18px;font-size:.9rem;line-height:1.7;">' +
+      '<li><strong>Le prix n\'est pas écrit, il est calculé.</strong> À chaque heure : résiduel = charge − éolien − solaire, puis prix = gaz × heat rate marginal, plus une prime de rareté quand le parc pilotable sature.</li>' +
+      '<li><strong>Le lien gaz-élec est explicite</strong> : le prix du gaz déplace tout le niveau des prix élec, et le spark spread de ta CCGT peut se comprimer alors même que l\'électricité est chère.</li>' +
+      '<li><strong>Les actifs se compensent</strong> : chaque journée montre le P&L de chacun, et tu vois lequel porte le portefeuille selon la météo.</li>' +
+      '<li><strong>Les couvertures persistent</strong> : un PPA ou un tolling signé en automne change tes revenus jusqu\'à la fin de la partie — le bilan final chiffre ce qu\'ils t\'ont coûté ou rapporté.</li>' +
+      '</ul></div>' +
+      '<div class="actions-row"><button class="btn btn-primary" data-sys="start">Démarrer l\'année</button>' +
+      (best ? '<span class="pill mono">Meilleur P&L : '+fmtK(best)+'</span>' : '') + '</div>';
+  }
+
+  if(sys.phase === 'end'){
+    var rate = sys.rounds ? Math.round(100*sys.goodCalls/sys.rounds) : 0;
+    var html = '<div class="hero"><div><h1>Bilan de l\'année</h1>' +
+      '<p>Le P&L dépend de la météo et des tirages ; le taux de décisions optimales, non. Le tableau des couvertures ci-dessous est le vrai enseignement : une couverture qui « coûte » sur l\'année n\'est pas une erreur, elle a acheté de la prévisibilité.</p></div>'+ring(rate)+'</div>';
+    html += '<div class="summary-stats">' +
+      '<div class="stat-box '+(sys.pnl>=0?'good':'bad')+'"><div class="stat-num mono">'+fmtK(sys.pnl)+'</div><div class="stat-label">P&L annuel</div></div>' +
+      '<div class="stat-box"><div class="stat-num mono">'+sys.goodCalls+' / '+sys.rounds+'</div><div class="stat-label">Décisions optimales</div></div>' +
+      '<div class="stat-box"><div class="stat-num mono">'+fmtK(Math.max.apply(null, sys.history.concat([0])))+'</div><div class="stat-label">Meilleure séquence</div></div>' +
+      '<div class="stat-box"><div class="stat-num mono">'+fmtK(Math.min.apply(null, sys.history.concat([0])))+'</div><div class="stat-label">Pire séquence</div></div>' +
+    '</div>';
+    var led = sys.ledger, any = (sys.book.ppaWind || sys.book.tollCCGT);
+    if(any){
+      html += '<section class="block"><h2>Ce que tes couvertures ont fait</h2><div class="table-wrap"><table class="cmp"><thead><tr>' +
+        '<th>Couverture</th><th>Effet cumulé vs merchant</th><th>Lecture</th></tr></thead><tbody>';
+      if(sys.book.ppaWind) html += '<tr><td>PPA éolien '+sys.book.ppaStrike+' $/MWh</td><td class="mono">'+fmtK(led.ppaWind)+'</td>' +
+        '<td>'+(led.ppaWind>=0 ? 'Le strike a battu le prix de capture réel : le PPA a créé de la valeur, en plus de la prévisibilité.' : 'Le PPA a coûté en revenu — c\'est le prix de la visibilité qui a permis le financement. Le juger uniquement sur ce chiffre serait une erreur.')+'</td></tr>';
+      if(sys.book.tollCCGT) html += '<tr><td>Tolling CCGT</td><td class="mono">'+fmtK(led.tollCCGT)+'</td>' +
+        '<td>'+(led.tollCCGT>=0 ? 'Le fee fixe a dépassé le spark spread réalisé : la couverture a payé, notamment quand le gaz s\'est tendu.' : 'Le spark spread merchant aurait rapporté davantage : tu as vendu de l\'optionalité qui valait cher cette année-là.')+'</td></tr>';
+      html += '</tbody></table></div></section>';
+    }
+    html += '<div class="actions-row"><button class="btn btn-primary" data-sys="restart">Rejouer une année</button>' +
+      '<button class="btn btn-ghost" data-nav="dashboard">Retour au dashboard</button></div>';
+    return html;
+  }
+
+  var sc = sys.order[sys.day];
+  var html = sysHud();
+  html += '<div class="card">';
+  html += '<span class="quiz-chip">'+esc(sc.season.toUpperCase())+' · SÉQUENCE '+(sys.day+1)+'</span>';
+  html += '<h2 style="margin:12px 0 0;font-size:1.25rem;">'+esc(sc.title)+'</h2>';
+  html += '<div class="ctx-grid">' + sc.ctx.map(function(c){
+    return '<div class="ctx-item"><span class="k">'+esc(c.k)+'</span><span class="v">'+esc(c.v)+'</span></div>';
+  }).join('') + '</div>';
+
+  var day = sys.phase === 'result' ? sys.result.day : buildDay(sc, {mod:{}});
+  html += texasMap(sc, day);
+  html += stackChart(day);
+  html += sysPriceChart(day, sc);
+  html += '<p style="font-size:.95rem;margin:14px 0 18px;">'+esc(sc.brief)+'</p>';
+
+  html += '<div class="options">';
+  sc.options.forEach(function(opt, i){
+    var cls = 'choice';
+    if(sys.phase === 'result'){
+      cls += (i === sys.chosen ? ' chosen' : ' dim');
+      if(sys.result.bestEv && i === sys.result.bestEv.i) cls += ' best';
+    }
+    html += '<button class="'+cls+'" data-syschoice="'+i+'"'+(sys.phase==='result'?' disabled':'')+'>' +
+      '<span class="ctag">'+esc(opt.tag)+'</span><span class="ctitle">'+esc(opt.label)+'</span></button>';
+  });
+  html += '</div>';
+
+  if(sys.phase === 'result'){
+    var r = sys.result;
+    html += '<div class="resolution">';
+    html += '<span class="res-label mono">CE QUI S\'EST PASSÉ</span>';
+    html += '<p style="margin:4px 0 10px;font-weight:600;font-family:\'Archivo\',sans-serif;font-size:.95rem;">'+esc(r.real.name)+'</p>';
+    html += '<p style="margin:0 0 14px;font-size:.9rem;">'+esc(r.real.text)+'</p>';
+    html += '<div class="pnl-delta '+(r.applied>=0?'pos':'neg')+'">'+fmtK(r.applied)+'</div>';
+
+    if(r.breakdown){
+      html += assetBars(r.breakdown);
+      var dt = r.breakdown.detail;
+      html += '<div class="calc-wrap"><span class="calc-head">Lecture middle office</span><div class="calc">' +
+        '<div><span>Gaz</span><span>'+r.day.gas.toFixed(2)+' $/MMBtu × heat rate 7,2 + 3 $ de coûts variables</span><span class="mono">'+Math.round(dt.ccgt.gasCost)+' $/MWh</span></div>' +
+        '<div><span>CCGT</span><span>'+dt.ccgt.runHours+' h dans la monnaie, spark spread moyen '+Math.round(dt.ccgt.avgSpark)+' $/MWh</span><span class="mono">'+fmtK(r.breakdown.assets[0].pnl)+'</span></div>' +
+        '<div><span>Éolien</span><span>'+Math.round(dt.wind.volume)+' MWh au prix de capture '+Math.round(dt.wind.capture)+' $/MWh</span><span class="mono">'+fmtK(r.breakdown.assets[1].pnl)+'</span></div>' +
+        '<div><span>Solaire</span><span>'+Math.round(dt.solar.volume)+' MWh au prix de capture '+Math.round(dt.solar.capture)+' $/MWh</span><span class="mono">'+fmtK(r.breakdown.assets[2].pnl)+'</span></div>' +
+        '<div><span>Batterie</span><span>'+dt.bess.cycles+' cycle(s), charge '+dt.bess.windows.charge.map(function(h){return h+'h';}).join(', ')+' → décharge '+dt.bess.windows.discharge.map(function(h){return h+'h';}).join(', ')+'</span><span class="mono">'+fmtK(r.breakdown.assets[3].pnl)+'</span></div>' +
+      '</div></div>';
+    }
+
+    if(sc.noVerdict){
+      html += '<div class="verdict neutral"><p class="vhead">Décision de structuration — pas de bonne réponse en espérance</p>' +
+        '<p class="vtext">'+esc(r.opt.why)+'</p>' +
+        '<p class="vtext dim">Ce type de décision engage plusieurs années : son effet réel apparaîtra dans le bilan de fin de partie, pas dans le P&L du jour. Elle ne compte donc pas dans ton score de décisions.</p></div>';
+    } else {
+      html += '<div class="verdict '+(r.optimal?'ok':'ko')+'">';
+      if(r.optimal){
+        html += '<p class="vhead">Décision optimale ex ante</p><p class="vtext">'+esc(r.opt.why)+'</p>';
+      } else {
+        html += '<p class="vhead">Une meilleure décision existait : « '+esc(r.bestEv.label)+' »</p>' +
+          '<p class="vtext">'+esc(r.bestEv.why)+'</p>' +
+          '<p class="vtext dim">Espérance de ton choix '+fmtK(r.table[sys.chosen].ev)+' contre '+fmtK(r.bestEv.ev)+'.</p>';
+      }
+      html += '</div>';
+    }
+
+    html += '<div class="table-wrap" style="margin-top:14px;"><table class="cmp opt-table"><thead><tr>' +
+      '<th>Option</th><th>Espérance</th><th>Résultat réalisé</th></tr></thead><tbody>';
+    r.table.forEach(function(t){
+      var marks = (t.i === sys.chosen ? '<span class="tag-you">ton choix</span>' : '') +
+                  (t.i === r.bestEv.i && !sc.noVerdict ? '<span class="tag-best">meilleure EV</span>' : '');
+      html += '<tr class="'+(t.i===sys.chosen?'is-you':'')+'"><td>'+esc(t.label)+' '+marks+'</td>' +
+        '<td class="mono '+(t.ev>=0?'pos':'neg')+'">'+fmtK(t.ev)+'</td>' +
+        '<td class="mono '+(t.real>=0?'pos':'neg')+'">'+fmtK(t.real)+'</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    html += '<div class="lesson"><strong>À retenir —</strong> '+esc(sc.lesson)+'</div>';
+    html += '</div>';
+    html += '<div class="quiz-foot"><button class="btn btn-primary" data-sys="next">' +
+      (sys.day >= SYS_LEN-1 || sys.busted ? 'Voir le bilan de l\'année' : 'Séquence suivante') + '</button></div>';
+  }
+  html += '</div>';
+  return html;
+}
+
 function gameFoot(){
   if(game.busted) return '<div class="quiz-foot"><button class="btn btn-primary" data-game="next">Voir le bilan (limites coupées)</button></div>';
   var last = game.day >= GAME_LEN - 1;
@@ -2034,6 +2816,7 @@ function goNav(nav){
   if(nav === 'dashboard'){ app.view='dashboard'; render(); return; }
   if(nav === 'reference'){ app.view='reference'; render(); return; }
   if(nav === 'game'){ app.view='game'; render(); return; }
+  if(nav === 'system'){ app.view='system'; render(); return; }
   if(nav === 'review'){
     var q = reviewQueue();
     if(q.length===0){ app.view='dashboard'; render(); flashEmpty(); return; }
@@ -2115,6 +2898,12 @@ document.addEventListener('click', function(e){
     return;
   }
 
+  var sysEl = t.closest('[data-sys]');
+  if(sysEl){ sysAction(sysEl.getAttribute('data-sys')); return; }
+
+  var sysChoice = t.closest('[data-syschoice]');
+  if(sysChoice && !sysChoice.disabled){ sysChoose(parseInt(sysChoice.getAttribute('data-syschoice'), 10)); return; }
+
   var gameEl = t.closest('[data-game]');
   if(gameEl){ gameAction(gameEl.getAttribute('data-game')); return; }
 
@@ -2131,6 +2920,7 @@ document.addEventListener('click', function(e){
       app.view = 'dashboard';
       session = null;
       game = null;
+      sys = null;
       render();
     }
     return;
